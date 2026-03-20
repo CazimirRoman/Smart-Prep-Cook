@@ -1,0 +1,5 @@
+{
+  "name": "Smart Prep & Cook",
+  "description": "An intelligent cooking assistant that generates easy recipes, smart grocery lists, and parallelized step-by-step cooking instructions.",
+  "requestFramePermissions": []
+}
