@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
-import { generateMealPlan, swapMeal, generateGroceryList, generateCookingSteps } from './services/ai';
+import { generateMealPlan, swapMeal, generateGroceryList, generateCookingSteps, generateRecipeFromIngredients } from './services/ai';
 import { Meal, CategorizedGroceries, RecipeDetails } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'plan' | 'groceries'>('plan');
-  const [meals, setMeals] = useState<Meal[]>([]);
-  const [groceries, setGroceries] = useState<CategorizedGroceries>({});
+  const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry'>('plan');
+  const [meals, setMeals] = useState<Meal[]>(() => {
+    const saved = localStorage.getItem('smart-cook-meals');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [groceries, setGroceries] = useState<CategorizedGroceries>(() => {
+    const saved = localStorage.getItem('smart-cook-groceries');
+    return saved ? JSON.parse(saved) : {};
+  });
   
   const [loadingMeals, setLoadingMeals] = useState(false);
   const [loadingGroceries, setLoadingGroceries] = useState(false);
@@ -16,6 +22,15 @@ export default function App() {
   const [activeCookingMeal, setActiveCookingMeal] = useState<Meal | null>(null);
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetails | null>(null);
   const [loadingRecipe, setLoadingRecipe] = useState(false);
+
+  // Pantry State
+  const [pantryIngredients, setPantryIngredients] = useState<string[]>(() => {
+    const saved = localStorage.getItem('smart-cook-pantry');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [ingredientInput, setIngredientInput] = useState('');
+  const [generatedPantryMeal, setGeneratedPantryMeal] = useState<Meal | null>(null);
+  const [loadingPantryMeal, setLoadingPantryMeal] = useState(false);
 
   const [favorites, setFavorites] = useState<Meal[]>(() => {
     const saved = localStorage.getItem('smart-cook-favorites');
@@ -27,7 +42,21 @@ export default function App() {
   }, [favorites]);
 
   useEffect(() => {
-    loadInitialPlan();
+    localStorage.setItem('smart-cook-meals', JSON.stringify(meals));
+  }, [meals]);
+
+  useEffect(() => {
+    localStorage.setItem('smart-cook-groceries', JSON.stringify(groceries));
+  }, [groceries]);
+
+  useEffect(() => {
+    localStorage.setItem('smart-cook-pantry', JSON.stringify(pantryIngredients));
+  }, [pantryIngredients]);
+
+  useEffect(() => {
+    if (meals.length === 0) {
+      loadInitialPlan();
+    }
   }, []);
 
   const loadInitialPlan = async () => {
@@ -88,6 +117,32 @@ export default function App() {
       };
       return newGroceries;
     });
+  };
+
+  const handleAddIngredient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ingredientInput.trim() && !pantryIngredients.includes(ingredientInput.trim())) {
+      setPantryIngredients([...pantryIngredients, ingredientInput.trim()]);
+      setIngredientInput('');
+    }
+  };
+
+  const handleRemoveIngredient = (ing: string) => {
+    setPantryIngredients(pantryIngredients.filter(i => i !== ing));
+  };
+
+  const handleGenerateFromPantry = async () => {
+    if (pantryIngredients.length === 0) return;
+    setLoadingPantryMeal(true);
+    try {
+      const meal = await generateRecipeFromIngredients(pantryIngredients);
+      meal.day = "Pantry Creation";
+      setGeneratedPantryMeal(meal);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingPantryMeal(false);
+    }
   };
 
   const startCooking = async (meal: Meal) => {
@@ -211,7 +266,7 @@ export default function App() {
                 </div>
               )}
             </motion.div>
-          ) : (
+          ) : activeTab === 'groceries' ? (
             <motion.div 
               key="groceries"
               initial={{ opacity: 0, y: 10 }}
@@ -273,7 +328,101 @@ export default function App() {
                 </div>
               )}
             </motion.div>
-          )}
+          ) : activeTab === 'pantry' ? (
+            <motion.div 
+              key="pantry"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-semibold">Cook from Pantry</h2>
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
+                <p className="text-stone-500 text-sm mb-4">Enter the ingredients you have on hand, and we'll generate a recipe for you.</p>
+                
+                <form onSubmit={handleAddIngredient} className="flex gap-2 mb-4">
+                  <input 
+                    type="text" 
+                    value={ingredientInput} 
+                    onChange={e => setIngredientInput(e.target.value)} 
+                    placeholder="e.g., chicken breast, broccoli, rice" 
+                    className="flex-1 px-4 py-3 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-stone-50" 
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={!ingredientInput.trim()} 
+                    className="bg-stone-900 text-white px-4 py-3 rounded-xl disabled:opacity-50 hover:bg-stone-800 transition-colors"
+                  >
+                    <Plus size={24} />
+                  </button>
+                </form>
+
+                {pantryIngredients.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {pantryIngredients.map(ing => (
+                      <span key={ing} className="bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2">
+                        {ing}
+                        <button onClick={() => handleRemoveIngredient(ing)} className="hover:text-emerald-950 p-0.5 rounded-full hover:bg-emerald-200 transition-colors">
+                          <X size={14} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <button 
+                  onClick={handleGenerateFromPantry} 
+                  disabled={pantryIngredients.length === 0 || loadingPantryMeal} 
+                  className="w-full bg-emerald-500 text-stone-900 font-bold py-3 rounded-xl disabled:opacity-50 flex justify-center items-center gap-2 hover:bg-emerald-400 transition-colors shadow-sm"
+                >
+                  {loadingPantryMeal ? <RefreshCw className="animate-spin" size={20} /> : <ChefHat size={20} />}
+                  {loadingPantryMeal ? "Creating Recipe..." : "Generate Recipe"}
+                </button>
+              </div>
+
+              {generatedPantryMeal && (
+                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
+                      {generatedPantryMeal.day}
+                    </span>
+                    <button 
+                      onClick={() => toggleFavorite(generatedPantryMeal)}
+                      className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === generatedPantryMeal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
+                      title={favorites.some(f => f.title === generatedPantryMeal.title) ? "Remove from favorites" : "Add to favorites"}
+                    >
+                      <Heart size={18} fill={favorites.some(f => f.title === generatedPantryMeal.title) ? "currentColor" : "none"} />
+                    </button>
+                  </div>
+                  <h3 className="text-xl font-semibold mb-1">{generatedPantryMeal.title}</h3>
+                  <p className="text-stone-500 text-sm mb-4">{generatedPantryMeal.description}</p>
+                  
+                  <div className="mb-4 bg-stone-50 p-4 rounded-xl border border-stone-100">
+                    <h4 className="font-semibold text-sm mb-2 text-stone-700">Ingredients needed:</h4>
+                    <ul className="text-sm text-stone-600 list-disc pl-5 space-y-1">
+                      {generatedPantryMeal.ingredients.map((ing, i) => <li key={i}>{ing}</li>)}
+                    </ul>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
+                    <div className="flex items-center gap-4 text-sm text-stone-500">
+                      <span className="flex items-center gap-1"><Clock size={16} /> {generatedPantryMeal.prepTime + generatedPantryMeal.cookTime} min total</span>
+                    </div>
+                    <button 
+                      onClick={() => startCooking(generatedPantryMeal)}
+                      className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                    >
+                      <Play size={16} fill="currentColor" />
+                      Start Cooking
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          ) : null}
         </AnimatePresence>
       </main>
 
@@ -299,6 +448,13 @@ export default function App() {
           >
             <ShoppingCart size={24} />
             Groceries
+          </button>
+          <button 
+            onClick={() => setActiveTab('pantry')}
+            className={`flex-1 py-4 flex flex-col items-center gap-1 text-xs font-medium transition-colors ${activeTab === 'pantry' ? 'text-emerald-600' : 'text-stone-400 hover:text-stone-600'}`}
+          >
+            <Utensils size={24} />
+            Pantry
           </button>
         </div>
       </nav>

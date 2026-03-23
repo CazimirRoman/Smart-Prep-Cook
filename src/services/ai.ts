@@ -110,6 +110,34 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
   return categorized;
 }
 
+export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: `Suggest a 30-minute dinner recipe that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          day: { type: Type.STRING },
+          title: { type: Type.STRING },
+          description: { type: Type.STRING },
+          prepTime: { type: Type.NUMBER },
+          cookTime: { type: Type.NUMBER },
+          ingredients: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
+        },
+        required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+}
+
 export async function generateCookingSteps(meal: Meal): Promise<RecipeDetails> {
   const response = await ai.models.generateContent({
     model: MODEL,
