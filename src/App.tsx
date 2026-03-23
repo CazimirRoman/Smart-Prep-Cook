@@ -1,8 +1,29 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateCookingSteps, generateRecipeFromIngredients } from './services/ai';
 import { Meal, CategorizedGroceries, RecipeDetails } from './types';
 import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+const COMMON_INGREDIENTS = [
+  { name: 'Chicken', icon: '🍗' },
+  { name: 'Beef', icon: '🥩' },
+  { name: 'Pork', icon: '🥓' },
+  { name: 'Fish', icon: '🐟' },
+  { name: 'Eggs', icon: '🥚' },
+  { name: 'Rice', icon: '🍚' },
+  { name: 'Pasta', icon: '🍝' },
+  { name: 'Potatoes', icon: '🥔' },
+  { name: 'Onion', icon: '🧅' },
+  { name: 'Garlic', icon: '🧄' },
+  { name: 'Tomatoes', icon: '🍅' },
+  { name: 'Broccoli', icon: '🥦' },
+  { name: 'Carrots', icon: '🥕' },
+  { name: 'Spinach', icon: '🥬' },
+  { name: 'Cheese', icon: '🧀' },
+  { name: 'Milk', icon: '🥛' },
+  { name: 'Bread', icon: '🍞' },
+  { name: 'Beans', icon: '🫘' },
+];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry'>('plan');
@@ -31,6 +52,7 @@ export default function App() {
   const [ingredientInput, setIngredientInput] = useState('');
   const [generatedPantryMeal, setGeneratedPantryMeal] = useState<Meal | null>(null);
   const [loadingPantryMeal, setLoadingPantryMeal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [favorites, setFavorites] = useState<Meal[]>(() => {
     const saved = localStorage.getItem('smart-cook-favorites');
@@ -61,11 +83,17 @@ export default function App() {
 
   const loadInitialPlan = async () => {
     setLoadingMeals(true);
+    setError(null);
     try {
       const newMeals = await generateMealPlan(favorites);
-      setMeals(newMeals);
-    } catch (e) {
+      if (!newMeals || newMeals.length === 0) {
+        setError("AI returned an empty meal plan. Please try again.");
+      } else {
+        setMeals(newMeals);
+      }
+    } catch (e: any) {
       console.error(e);
+      setError(e.message || "An error occurred while generating the meal plan.");
     } finally {
       setLoadingMeals(false);
     }
@@ -129,6 +157,15 @@ export default function App() {
 
   const handleRemoveIngredient = (ing: string) => {
     setPantryIngredients(pantryIngredients.filter(i => i !== ing));
+  };
+
+  const toggleIngredient = (ing: string) => {
+    const lowerIng = ing.toLowerCase();
+    if (pantryIngredients.includes(lowerIng)) {
+      setPantryIngredients(pantryIngredients.filter(i => i !== lowerIng));
+    } else {
+      setPantryIngredients([...pantryIngredients, lowerIng]);
+    }
   };
 
   const handleGenerateFromPantry = async () => {
@@ -209,6 +246,12 @@ export default function App() {
                   Regenerate All
                 </button>
               </div>
+
+              {error && (
+                <div className="bg-rose-50 text-rose-600 p-4 rounded-xl text-sm border border-rose-200">
+                  {error}
+                </div>
+              )}
 
               {loadingMeals ? (
                 <div className="space-y-4">
@@ -359,6 +402,29 @@ export default function App() {
                     <Plus size={24} />
                   </button>
                 </form>
+
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-stone-700 mb-3">Quick Add</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {COMMON_INGREDIENTS.map(item => {
+                      const isSelected = pantryIngredients.includes(item.name.toLowerCase());
+                      return (
+                        <button
+                          key={item.name}
+                          onClick={() => toggleIngredient(item.name)}
+                          className={`px-3 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors ${
+                            isSelected 
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
+                              : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-50'
+                          } border shadow-sm`}
+                        >
+                          <span>{item.icon}</span>
+                          {item.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 {pantryIngredients.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-6">

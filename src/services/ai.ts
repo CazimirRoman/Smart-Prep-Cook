@@ -2,13 +2,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Meal, CategorizedGroceries, RecipeDetails } from "../types";
 
 // @ts-ignore
-const API_KEY = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || "";
+const API_KEY = process.env.GEMINI_API_KEY || (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GEMINI_API_KEY : "") || "";
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const MODEL = "gemini-3-flash-preview";
 
 export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> {
-  let prompt = "Generate a 5-day weekday dinner meal plan for a family of 3 (2 adults, 1 child). The meals MUST take around 30 minutes total to cook. No dietary restrictions. Make them easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.";
+  let prompt = "Generate a 5-day weekday dinner meal plan for 2 people. The meals MUST take around 30 minutes total to cook. No dietary restrictions. Make them easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people (e.g., around 100-125g of pasta per person).";
   
   if (favorites.length > 0) {
     const favTitles = favorites.map(f => f.title).join(", ");
@@ -21,35 +21,52 @@ export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> 
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            id: { type: Type.STRING },
-            day: { type: Type.STRING, description: "e.g., Monday, Tuesday" },
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            prepTime: { type: Type.NUMBER, description: "Time in minutes" },
-            cookTime: { type: Type.NUMBER, description: "Time in minutes" },
-            ingredients: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "List of ingredients with quantities"
+        type: Type.OBJECT,
+        properties: {
+          meals: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                day: { type: Type.STRING, description: "e.g., Monday, Tuesday" },
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                prepTime: { type: Type.NUMBER, description: "Time in minutes" },
+                cookTime: { type: Type.NUMBER, description: "Time in minutes" },
+                ingredients: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "List of ingredients with quantities"
+                }
+              },
+              required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
             }
-          },
-          required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
-        }
+          }
+        },
+        required: ["meals"]
       }
     }
   });
 
-  return JSON.parse(response.text || "[]");
+  if (!response.text) {
+    console.error("Empty response from AI", response);
+    throw new Error("The AI returned an empty response. Please try again.");
+  }
+
+  try {
+    const parsed = JSON.parse(response.text);
+    return parsed.meals || [];
+  } catch (e) {
+    console.error("Failed to parse AI response:", response.text);
+    throw new Error("The AI returned an invalid response format. Please try again.");
+  }
 }
 
 export async function swapMeal(day: string, rejectedMealTitle: string): Promise<Meal> {
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: `Suggest a new 30-minute dinner for a family of 3 for ${day} to replace "${rejectedMealTitle}". It should be easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.`,
+    contents: `Suggest a new 30-minute dinner for 2 people for ${day} to replace "${rejectedMealTitle}". It should be easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -83,23 +100,34 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
     config: {
       responseMimeType: "application/json",
       responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            category: { type: Type.STRING, description: "e.g., Produce, Meat, Dairy, Pantry" },
-            items: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING } 
+        type: Type.OBJECT,
+        properties: {
+          categories: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                category: { type: Type.STRING, description: "e.g., Produce, Meat, Dairy, Pantry" },
+                items: { 
+                  type: Type.ARRAY, 
+                  items: { type: Type.STRING } 
+                }
+              },
+              required: ["category", "items"]
             }
-          },
-          required: ["category", "items"]
-        }
+          }
+        },
+        required: ["categories"]
       }
     }
   });
 
-  const rawCategories: { category: string, items: string[] }[] = JSON.parse(response.text || "[]");
+  if (!response.text) {
+    throw new Error("Empty response from AI");
+  }
+
+  const parsed = JSON.parse(response.text);
+  const rawCategories: { category: string, items: string[] }[] = parsed.categories || [];
   
   // Convert to our UI format
   const categorized: CategorizedGroceries = {};
@@ -113,7 +141,7 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: `Suggest a 30-minute dinner recipe that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.`,
+    contents: `Suggest a 30-minute dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
