@@ -5,6 +5,12 @@ export interface CookingStep {
   parallelTasks?: string[];
 }
 
+export interface Ingredient {
+  name: string;
+  category: string;
+  icon: string;
+}
+
 export interface Meal {
   id: string;
   type: 'breakfast' | 'dinner';
@@ -14,10 +20,11 @@ export interface Meal {
   description: string;
   prepTime: number;
   cookTime: number;
-  ingredients: string[];
+  ingredients: Ingredient[] | string[];
+  miseEnPlace: string[];
   steps: CookingStep[];
 }
 
 export interface CategorizedGroceries {
-  [category: string]: { item: string; checked: boolean }[];
+  [category: string]: { item: string; icon: string; checked: boolean }[];
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients } from './services/ai';
 import { Meal, CategorizedGroceries } from './types';
 import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus } from 'lucide-react';
@@ -26,7 +26,7 @@ const COMMON_INGREDIENTS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry' | 'favorites'>('plan');
   const [meals, setMeals] = useState<Meal[]>(() => {
     const saved = localStorage.getItem('smart-cook-meals');
     return saved ? JSON.parse(saved) : [];
@@ -41,6 +41,26 @@ export default function App() {
   const [swappingMealId, setSwappingMealId] = useState<string | null>(null);
   
   const [activeCookingMeal, setActiveCookingMeal] = useState<Meal | null>(null);
+  const [mealGroceriesState, setMealGroceriesState] = useState<{
+    isOpen: boolean;
+    meal: Meal | null;
+    loading: boolean;
+    groceries: CategorizedGroceries | null;
+  }>({ isOpen: false, meal: null, loading: false, groceries: null });
+
+  const handleViewMealGroceries = (meal: Meal) => {
+    const list: CategorizedGroceries = {};
+    meal.ingredients.forEach(ing => {
+      if (typeof ing === 'string') {
+        if (!list['Other']) list['Other'] = [];
+        list['Other'].push({ item: ing, icon: '🛒', checked: false });
+      } else {
+        if (!list[ing.category]) list[ing.category] = [];
+        list[ing.category].push({ item: ing.name, icon: ing.icon, checked: false });
+      }
+    });
+    setMealGroceriesState({ isOpen: true, meal, loading: false, groceries: list });
+  };
 
   // Pantry State
   const [pantryIngredients, setPantryIngredients] = useState<string[]>(() => {
@@ -190,6 +210,56 @@ export default function App() {
     setActiveCookingMeal(null);
   };
 
+  if (mealGroceriesState.isOpen && mealGroceriesState.meal) {
+    return (
+      <div className="min-h-screen bg-stone-50 font-sans p-4 sm:p-8 flex items-center justify-center">
+        <div className="bg-white rounded-3xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-900 text-white">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <ShoppingCart size={24} />
+              Groceries for {mealGroceriesState.meal.title}
+            </h2>
+            <button 
+              onClick={() => setMealGroceriesState({ isOpen: false, meal: null, loading: false, groceries: null })}
+              className="p-2 hover:bg-stone-800 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <div className="p-6 overflow-y-auto flex-1">
+            {mealGroceriesState.loading ? (
+              <div className="flex flex-col items-center justify-center py-12 text-stone-500">
+                <RefreshCw size={32} className="animate-spin mb-4 text-emerald-500" />
+                <p>Generating grocery list...</p>
+              </div>
+            ) : mealGroceriesState.groceries ? (
+              <div className="space-y-6">
+                {Object.entries(mealGroceriesState.groceries).map(([category, items]) => (
+                  <div key={category}>
+                    <h3 className="text-lg font-semibold text-stone-800 mb-3 capitalize">{category}</h3>
+                    <ul className="space-y-2">
+                      {(items as { item: string; icon: string; checked: boolean }[]).map((item, idx) => (
+                        <li key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
+                          <span className="text-xl">{item.icon || '🛒'}</span>
+                          <span className="text-stone-700 font-medium">{item.item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-stone-500 py-8">
+                Failed to load groceries.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (activeCookingMeal) {
     return (
       <CookingModeView 
@@ -261,8 +331,8 @@ export default function App() {
                     <div className="space-y-4">
                       {meals.filter(m => m.type === 'breakfast').map(meal => (
                         <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
-                          <div className="flex justify-between items-start mb-2">
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex gap-2 flex-wrap">
                               <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md ${meal.prepStyle === 'make-ahead' ? 'text-indigo-600 bg-indigo-50' : 'text-amber-600 bg-amber-50'}`}>
                                 {meal.prepStyle === 'make-ahead' ? 'Make-Ahead' : 'Fresh Morning'}
                               </span>
@@ -295,13 +365,22 @@ export default function App() {
                             <div className="flex items-center gap-4 text-sm text-stone-500">
                               <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
                             </div>
-                            <button 
-                              onClick={() => startCooking(meal)}
-                              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
-                            >
-                              <Play size={16} fill="currentColor" />
-                              Start Cooking
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleViewMealGroceries(meal)}
+                                className="bg-stone-100 text-stone-700 p-2 rounded-xl hover:bg-stone-200 transition-colors"
+                                title="Grocery List for this meal"
+                              >
+                                <ShoppingCart size={16} />
+                              </button>
+                              <button 
+                                onClick={() => startCooking(meal)}
+                                className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                              >
+                                <Play size={16} fill="currentColor" />
+                                Start Cooking
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -316,8 +395,8 @@ export default function App() {
                     <div className="space-y-4">
                       {meals.filter(m => m.type === 'dinner').map((meal, index) => (
                         <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
-                          <div className="flex justify-between items-start mb-2">
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex gap-2 flex-wrap">
                               <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
                                 Cook Day {index + 1}
                               </span>
@@ -350,13 +429,22 @@ export default function App() {
                             <div className="flex items-center gap-4 text-sm text-stone-500">
                               <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
                             </div>
-                            <button 
-                              onClick={() => startCooking(meal)}
-                              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
-                            >
-                              <Play size={16} fill="currentColor" />
-                              Start Cooking
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleViewMealGroceries(meal)}
+                                className="bg-stone-100 text-stone-700 p-2 rounded-xl hover:bg-stone-200 transition-colors"
+                                title="Grocery List for this meal"
+                              >
+                                <ShoppingCart size={16} />
+                              </button>
+                              <button 
+                                onClick={() => startCooking(meal)}
+                                className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                              >
+                                <Play size={16} fill="currentColor" />
+                                Start Cooking
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -403,7 +491,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {(Object.entries(groceries) as [string, { item: string; checked: boolean }[]][]).map(([category, items]) => (
+                  {(Object.entries(groceries) as [string, { item: string; icon?: string; checked: boolean }[]][]).map(([category, items]) => (
                     <div key={category} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
                       <h3 className="text-lg font-semibold mb-4 text-stone-800">{category}</h3>
                       <ul className="space-y-3">
@@ -416,7 +504,8 @@ export default function App() {
                             <div className="mt-0.5 text-emerald-500 shrink-0">
                               {item.checked ? <CheckCircle2 size={20} /> : <Circle size={20} className="text-stone-300 group-hover:text-emerald-400" />}
                             </div>
-                            <span className={`text-stone-700 ${item.checked ? 'line-through opacity-50' : ''}`}>
+                            <span className={`text-stone-700 flex items-center gap-2 ${item.checked ? 'line-through opacity-50' : ''}`}>
+                              {item.icon && <span>{item.icon}</span>}
                               {item.item}
                             </span>
                           </li>
@@ -525,7 +614,7 @@ export default function App() {
                   <div className="mb-4 bg-stone-50 p-4 rounded-xl border border-stone-100">
                     <h4 className="font-semibold text-sm mb-2 text-stone-700">Ingredients needed:</h4>
                     <ul className="text-sm text-stone-600 list-disc pl-5 space-y-1">
-                      {generatedPantryMeal.ingredients.map((ing, i) => <li key={i}>{ing}</li>)}
+                      {generatedPantryMeal.ingredients.map((ing, i) => <li key={i}>{typeof ing === 'string' ? ing : ing.name}</li>)}
                     </ul>
                   </div>
 
@@ -533,14 +622,91 @@ export default function App() {
                     <div className="flex items-center gap-4 text-sm text-stone-500">
                       <span className="flex items-center gap-1"><Clock size={16} /> {generatedPantryMeal.prepTime + generatedPantryMeal.cookTime} min total</span>
                     </div>
-                    <button 
-                      onClick={() => startCooking(generatedPantryMeal)}
-                      className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
-                    >
-                      <Play size={16} fill="currentColor" />
-                      Start Cooking
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => handleViewMealGroceries(generatedPantryMeal)}
+                        className="bg-stone-100 text-stone-700 p-2 rounded-xl hover:bg-stone-200 transition-colors"
+                        title="Grocery List for this meal"
+                      >
+                        <ShoppingCart size={16} />
+                      </button>
+                      <button 
+                        onClick={() => startCooking(generatedPantryMeal)}
+                        className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                      >
+                        <Play size={16} fill="currentColor" />
+                        Start Cooking
+                      </button>
+                    </div>
                   </div>
+                </div>
+              )}
+            </motion.div>
+          ) : activeTab === 'favorites' ? (
+            <motion.div 
+              key="favorites"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex flex-col gap-6"
+            >
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-stone-800">Your Favorites</h2>
+              </div>
+              
+              {favorites.length > 0 ? (
+                <div className="space-y-4">
+                  {favorites.map(meal => (
+                    <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex gap-2 flex-wrap">
+                            <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md text-stone-600 bg-stone-100">
+                              {meal.type === 'breakfast' ? 'Breakfast' : 'Dinner'}
+                            </span>
+                            <span className="text-xs font-bold uppercase tracking-wider text-stone-600 bg-stone-100 px-2 py-1 rounded-md">
+                              {meal.portions} Portions
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => toggleFavorite(meal)}
+                              className="p-1.5 rounded-full transition-colors text-rose-500 hover:bg-rose-50"
+                              title="Remove from favorites"
+                            >
+                              <Heart size={18} fill="currentColor" />
+                            </button>
+                          </div>
+                        </div>
+                        <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                        <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
+                        
+                        <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
+                          <div className="flex items-center gap-4 text-sm text-stone-500">
+                            <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => handleViewMealGroceries(meal)}
+                              className="bg-stone-100 text-stone-700 p-2 rounded-xl hover:bg-stone-200 transition-colors"
+                              title="Grocery List for this meal"
+                            >
+                              <ShoppingCart size={16} />
+                            </button>
+                            <button 
+                              onClick={() => startCooking(meal)}
+                              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                            >
+                              <Play size={16} fill="currentColor" />
+                              Start Cooking
+                            </button>
+                          </div>
+                        </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-10">
+                  <p className="text-stone-400">You haven't saved any favorites yet. Click the heart icon on any recipe to save it here!</p>
                 </div>
               )}
             </motion.div>
@@ -578,6 +744,13 @@ export default function App() {
             <Utensils size={24} />
             Pantry
           </button>
+          <button 
+            onClick={() => setActiveTab('favorites')}
+            className={`flex-1 py-4 flex flex-col items-center gap-1 text-xs font-medium transition-colors ${activeTab === 'favorites' ? 'text-emerald-600' : 'text-stone-400 hover:text-stone-600'}`}
+          >
+            <Heart size={24} />
+            Favorites
+          </button>
         </div>
       </nav>
     </div>
@@ -585,6 +758,20 @@ export default function App() {
 }
 
 function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void }) {
+  const steps = useMemo(() => {
+    if (meal.miseEnPlace && meal.miseEnPlace.length > 0) {
+      return [
+        {
+          id: 'mise-en-place',
+          instruction: 'Mise en Place (Preparation)',
+          parallelTasks: meal.miseEnPlace,
+        },
+        ...meal.steps
+      ];
+    }
+    return meal.steps;
+  }, [meal]);
+
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [timers, setTimers] = useState<{ id: string; label: string; timeLeft: number; isActive: boolean; total: number }[]>([]);
 
@@ -603,8 +790,8 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
     return () => clearInterval(interval);
   }, []);
 
-  const step = meal.steps[currentStepIndex];
-  const progress = ((currentStepIndex + 1) / meal.steps.length) * 100;
+  const step = steps[currentStepIndex];
+  const progress = ((currentStepIndex + 1) / steps.length) * 100;
   const existingTimer = timers.find(t => t.id === step.id);
 
   return (
@@ -616,7 +803,7 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
         </button>
         <div className="text-center">
           <h2 className="font-semibold text-lg">{meal.title}</h2>
-          <p className="text-xs text-emerald-400 font-medium">Step {currentStepIndex + 1} of {meal.steps.length}</p>
+          <p className="text-xs text-emerald-400 font-medium">Step {currentStepIndex + 1} of {steps.length}</p>
         </div>
         <div className="w-10"></div> {/* Spacer for centering */}
       </header>
@@ -730,7 +917,7 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
                 <div className="bg-emerald-900/20 border border-emerald-800/50 rounded-2xl p-6">
                   <h3 className="text-emerald-400 font-semibold mb-4 flex items-center gap-2">
                     <RefreshCw size={18} />
-                    While you wait, do this:
+                    {step.id === 'mise-en-place' ? 'Prepare these before cooking:' : 'While you wait, do this:'}
                   </h3>
                   <ul className="space-y-3">
                     {step.parallelTasks.map((task, idx) => (
@@ -759,15 +946,15 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
           </button>
           <button 
             onClick={() => {
-              if (currentStepIndex === meal.steps.length - 1) {
+              if (currentStepIndex === steps.length - 1) {
                 onClose();
               } else {
-                setCurrentStepIndex(prev => Math.min(meal.steps.length - 1, prev + 1));
+                setCurrentStepIndex(prev => Math.min(steps.length - 1, prev + 1));
               }
             }}
             className="flex-1 py-4 rounded-2xl bg-emerald-500 text-stone-900 font-bold text-lg flex items-center justify-center gap-2 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/20"
           >
-            {currentStepIndex === meal.steps.length - 1 ? (
+            {currentStepIndex === steps.length - 1 ? (
               <>Finish Cooking <CheckCircle2 size={20} /></>
             ) : (
               <>Next Step <ArrowRight size={20} /></>

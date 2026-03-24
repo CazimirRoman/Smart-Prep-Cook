@@ -64,12 +64,25 @@ IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NO
                 cookTime: { type: Type.NUMBER, description: "Time in minutes" },
                 ingredients: {
                   type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING, description: "Ingredient name with quantity" },
+                      category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
+                      icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
+                    },
+                    required: ["name", "category", "icon"]
+                  },
+                  description: "List of ingredients with quantities, categories, and icons"
+                },
+                miseEnPlace: {
+                  type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: "List of ingredients with quantities"
+                  description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
                 },
                 steps: stepsSchema
               },
-              required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
+              required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
             }
           }
         },
@@ -131,11 +144,24 @@ IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NO
           cookTime: { type: Type.NUMBER },
           ingredients: {
             type: Type.ARRAY,
-            items: { type: Type.STRING }
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING, description: "Ingredient name with quantity" },
+                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
+                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
+              },
+              required: ["name", "category", "icon"]
+            }
+          },
+          miseEnPlace: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
           },
           steps: stepsSchema
         },
-        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
+        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
       }
     }
   });
@@ -144,11 +170,11 @@ IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NO
 }
 
 export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGroceries> {
-  const allIngredients = meals.flatMap(m => m.ingredients).join("\\n");
+  const allIngredients = meals.flatMap(m => (m.ingredients as any[]) || []).map((ing: any) => typeof ing === 'string' ? ing : ing.name).join("\\n");
   
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: `Categorize the following ingredients into a standard grocery shopping list.\\n\\nIMPORTANT: You MUST combine and aggregate quantities for identical or similar ingredients. For example, if you see "200g chicken" and "300g chicken", combine them into a single entry "500g chicken". Do not output duplicate items.\\n\\nIngredients:\\n${allIngredients}`,
+    contents: `Categorize the following ingredients into a standard grocery shopping list.\\n\\nIMPORTANT: You MUST combine and aggregate quantities for identical or similar ingredients. For example, if you see "200g chicken" and "300g chicken", combine them into a single entry "500g chicken". Do not output duplicate items. For each item, provide a fitting emoji icon.\\n\\nIngredients:\\n${allIngredients}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -162,7 +188,14 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
                 category: { type: Type.STRING, description: "e.g., Produce, Meat, Dairy, Pantry" },
                 items: { 
                   type: Type.ARRAY, 
-                  items: { type: Type.STRING } 
+                  items: { 
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      icon: { type: Type.STRING, description: "A single emoji representing the item" }
+                    },
+                    required: ["name", "icon"]
+                  } 
                 }
               },
               required: ["category", "items"]
@@ -179,12 +212,12 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
   }
 
   const parsed = JSON.parse(response.text);
-  const rawCategories: { category: string, items: string[] }[] = parsed.categories || [];
+  const rawCategories: { category: string, items: { name: string, icon: string }[] }[] = parsed.categories || [];
   
   // Convert to our UI format
   const categorized: CategorizedGroceries = {};
   for (const cat of rawCategories) {
-    categorized[cat.category] = cat.items.map(item => ({ item, checked: false }));
+    categorized[cat.category] = cat.items.map(i => ({ item: i.name, icon: i.icon, checked: false }));
   }
   
   return categorized;
@@ -213,11 +246,24 @@ IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all
           cookTime: { type: Type.NUMBER },
           ingredients: {
             type: Type.ARRAY,
-            items: { type: Type.STRING }
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING, description: "Ingredient name with quantity" },
+                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
+                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
+              },
+              required: ["name", "category", "icon"]
+            }
+          },
+          miseEnPlace: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
           },
           steps: stepsSchema
         },
-        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
+        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
       }
     }
   });
