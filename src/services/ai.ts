@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { Meal, CategorizedGroceries, RecipeDetails } from "../types";
+import { Meal, CategorizedGroceries } from "../types";
 
 // @ts-ignore
 const API_KEY = process.env.GEMINI_API_KEY || (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GEMINI_API_KEY : "") || "";
@@ -7,12 +7,38 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const MODEL = "gemini-3-flash-preview";
 
+const stepsSchema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      instruction: { type: Type.STRING, description: "The main action to take." },
+      durationMinutes: { type: Type.NUMBER, description: "Duration of this step in minutes, if it involves waiting/cooking." },
+      parallelTasks: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "Tasks to perform while this step's duration is elapsing."
+      }
+    },
+    required: ["id", "instruction"]
+  }
+};
+
 export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> {
-  let prompt = "Generate a 5-day weekday dinner meal plan for 2 people. The meals MUST take around 30 minutes total to cook. No dietary restrictions. Make them easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people (e.g., around 100-125g of pasta per person).";
+  let prompt = `Generate a weekly meal plan for 2 people with a specific batch-cooking and creative breakfast routine.
+Return EXACTLY 6 meals:
+- 2 "Batch Dinners": Hearty, fridge-friendly meals (stews, curries, casseroles, hearty pastas) that yield 4-6 portions each and last for 2-3 days. Cook time can be 45-60 mins.
+- 2 "Make-Ahead Breakfasts": Creative breakfasts prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.
+- 2 "Fresh Breakfasts": Creative, interesting morning meals made fresh (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.
+
+For EACH recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
+
+IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.`;
   
   if (favorites.length > 0) {
     const favTitles = favorites.map(f => f.title).join(", ");
-    prompt += `\n\nHere are some of the user's favorite meals: ${favTitles}. Please include 2 or 3 of these favorites in the 5-day plan, and generate new ideas for the remaining days.`;
+    prompt += `\n\nHere are some of the user's favorite meals: ${favTitles}. Please include 1 or 2 of these favorites if they fit the criteria, and generate new ideas for the rest.`;
   }
 
   const response = await ai.models.generateContent({
@@ -29,7 +55,9 @@ export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> 
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                day: { type: Type.STRING, description: "e.g., Monday, Tuesday" },
+                type: { type: Type.STRING, description: "'breakfast' or 'dinner'" },
+                prepStyle: { type: Type.STRING, description: "'make-ahead', 'fresh', or 'batch'" },
+                portions: { type: Type.NUMBER, description: "Number of portions the recipe yields" },
                 title: { type: Type.STRING },
                 description: { type: Type.STRING },
                 prepTime: { type: Type.NUMBER, description: "Time in minutes" },
@@ -38,9 +66,10 @@ export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> 
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
                   description: "List of ingredients with quantities"
-                }
+                },
+                steps: stepsSchema
               },
-              required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
+              required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
             }
           }
         },
@@ -63,17 +92,39 @@ export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> 
   }
 }
 
-export async function swapMeal(day: string, rejectedMealTitle: string): Promise<Meal> {
+export async function swapMeal(mealToSwap: Meal): Promise<Meal> {
+  let replacementPrompt = `Suggest a new recipe to replace "${mealToSwap.title}".
+Requirements:
+- Type: ${mealToSwap.type}
+- Prep Style: ${mealToSwap.prepStyle}
+- Portions: ${mealToSwap.portions}
+`;
+
+  if (mealToSwap.type === 'dinner') {
+    replacementPrompt += `- Must be a batch-cooking recipe (fridge-friendly, lasts 2-3 days, yields 4-6 portions). Cook time can be 45-60 mins.\n`;
+  } else if (mealToSwap.type === 'breakfast' && mealToSwap.prepStyle === 'make-ahead') {
+    replacementPrompt += `- Must be a creative breakfast prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.\n`;
+  } else if (mealToSwap.type === 'breakfast' && mealToSwap.prepStyle === 'fresh') {
+    replacementPrompt += `- Must be a creative breakfast made fresh in the morning (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.\n`;
+  }
+
+  replacementPrompt += `
+For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
+
+IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.`;
+
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: `Suggest a new 30-minute dinner for 2 people for ${day} to replace "${rejectedMealTitle}". It should be easy to implement. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
+    contents: replacementPrompt,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
         properties: {
           id: { type: Type.STRING },
-          day: { type: Type.STRING },
+          type: { type: Type.STRING },
+          prepStyle: { type: Type.STRING },
+          portions: { type: Type.NUMBER },
           title: { type: Type.STRING },
           description: { type: Type.STRING },
           prepTime: { type: Type.NUMBER },
@@ -81,9 +132,10 @@ export async function swapMeal(day: string, rejectedMealTitle: string): Promise<
           ingredients: {
             type: Type.ARRAY,
             items: { type: Type.STRING }
-          }
+          },
+          steps: stepsSchema
         },
-        required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
+        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
       }
     }
   });
@@ -141,14 +193,20 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
   const response = await ai.models.generateContent({
     model: MODEL,
-    contents: `Suggest a 30-minute dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
+    contents: `Suggest a dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. 
+    
+For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
+
+IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
         properties: {
           id: { type: Type.STRING },
-          day: { type: Type.STRING },
+          type: { type: Type.STRING },
+          prepStyle: { type: Type.STRING },
+          portions: { type: Type.NUMBER },
           title: { type: Type.STRING },
           description: { type: Type.STRING },
           prepTime: { type: Type.NUMBER },
@@ -156,53 +214,13 @@ export async function generateRecipeFromIngredients(ingredients: string[]): Prom
           ingredients: {
             type: Type.ARRAY,
             items: { type: Type.STRING }
-          }
+          },
+          steps: stepsSchema
         },
-        required: ["id", "day", "title", "description", "prepTime", "cookTime", "ingredients"]
+        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "steps"]
       }
     }
   });
 
   return JSON.parse(response.text || "{}");
-}
-
-export async function generateCookingSteps(meal: Meal): Promise<RecipeDetails> {
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: `Create a highly optimized, parallelized step-by-step cooking guide for "${meal.title}". 
-    Ingredients: ${meal.ingredients.join(', ')}.
-    The total time should be around 30 minutes.
-    Identify steps that have a duration (like boiling, baking, simmering).
-    For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
-    This is crucial for saving time.
-    IMPORTANT: If you mention measurements in the steps, use ONLY metric units (grams, liters, milliliters). DO NOT use cups, ounces, or spoons.`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          steps: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                instruction: { type: Type.STRING, description: "The main action to take." },
-                durationMinutes: { type: Type.NUMBER, description: "Duration of this step in minutes, if it involves waiting/cooking." },
-                parallelTasks: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "Tasks to perform while this step's duration is elapsing."
-                }
-              },
-              required: ["id", "instruction"]
-            }
-          }
-        },
-        required: ["steps"]
-      }
-    }
-  });
-
-  return JSON.parse(response.text || '{"steps": []}');
 }

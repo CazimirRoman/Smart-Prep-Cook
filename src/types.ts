@@ -1,17 +1,3 @@
-export interface Meal {
-  id: string;
-  day: string;
-  title: string;
-  description: string;
-  prepTime: number;
-  cookTime: number;
-  ingredients: string[];
-}
-
-export interface CategorizedGroceries {
-  [category: string]: { item: string; checked: boolean }[];
-}
-
 export interface CookingStep {
   id: string;
   instruction: string;
@@ -19,6 +5,19 @@ export interface CookingStep {
   parallelTasks?: string[];
 }
 
-export interface RecipeDetails {
+export interface Meal {
+  id: string;
+  type: 'breakfast' | 'dinner';
+  prepStyle: 'make-ahead' | 'fresh' | 'batch';
+  portions: number;
+  title: string;
+  description: string;
+  prepTime: number;
+  cookTime: number;
+  ingredients: string[];
   steps: CookingStep[];
+}
+
+export interface CategorizedGroceries {
+  [category: string]: { item: string; checked: boolean }[];
 }

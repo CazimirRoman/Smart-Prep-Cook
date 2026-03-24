@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { generateMealPlan, swapMeal, generateGroceryList, generateCookingSteps, generateRecipeFromIngredients } from './services/ai';
-import { Meal, CategorizedGroceries, RecipeDetails } from './types';
+import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients } from './services/ai';
+import { Meal, CategorizedGroceries } from './types';
 import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -41,8 +41,6 @@ export default function App() {
   const [swappingMealId, setSwappingMealId] = useState<string | null>(null);
   
   const [activeCookingMeal, setActiveCookingMeal] = useState<Meal | null>(null);
-  const [recipeDetails, setRecipeDetails] = useState<RecipeDetails | null>(null);
-  const [loadingRecipe, setLoadingRecipe] = useState(false);
 
   // Pantry State
   const [pantryIngredients, setPantryIngredients] = useState<string[]>(() => {
@@ -113,7 +111,7 @@ export default function App() {
   const handleSwapMeal = async (meal: Meal) => {
     setSwappingMealId(meal.id);
     try {
-      const newMeal = await swapMeal(meal.day, meal.title);
+      const newMeal = await swapMeal(meal);
       setMeals(prev => prev.map(m => m.id === meal.id ? newMeal : m));
     } catch (e) {
       console.error(e);
@@ -173,7 +171,9 @@ export default function App() {
     setLoadingPantryMeal(true);
     try {
       const meal = await generateRecipeFromIngredients(pantryIngredients);
-      meal.day = "Pantry Creation";
+      meal.type = 'dinner';
+      meal.prepStyle = 'fresh';
+      meal.portions = 2;
       setGeneratedPantryMeal(meal);
     } catch (e) {
       console.error(e);
@@ -184,28 +184,16 @@ export default function App() {
 
   const startCooking = async (meal: Meal) => {
     setActiveCookingMeal(meal);
-    setLoadingRecipe(true);
-    try {
-      const details = await generateCookingSteps(meal);
-      setRecipeDetails(details);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingRecipe(false);
-    }
   };
 
   const closeCookingMode = () => {
     setActiveCookingMeal(null);
-    setRecipeDetails(null);
   };
 
   if (activeCookingMeal) {
     return (
       <CookingModeView 
         meal={activeCookingMeal} 
-        details={recipeDetails} 
-        loading={loadingRecipe} 
         onClose={closeCookingMode} 
       />
     );
@@ -264,48 +252,116 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {meals.map(meal => (
-                    <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
-                          {meal.day}
-                        </span>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => toggleFavorite(meal)}
-                            className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === meal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
-                            title={favorites.some(f => f.title === meal.title) ? "Remove from favorites" : "Add to favorites"}
-                          >
-                            <Heart size={18} fill={favorites.some(f => f.title === meal.title) ? "currentColor" : "none"} />
-                          </button>
-                          <button 
-                            onClick={() => handleSwapMeal(meal)}
-                            disabled={swappingMealId === meal.id}
-                            className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors disabled:opacity-50"
-                            title="Swap this meal"
-                          >
-                            <RefreshCw size={18} className={swappingMealId === meal.id ? "animate-spin" : ""} />
-                          </button>
+                <div className="space-y-10">
+                  {/* Breakfasts Section */}
+                  <section>
+                    <h3 className="text-xl font-semibold mb-4 text-stone-800 flex items-center gap-2">
+                      <span className="text-2xl">🌅</span> Morning Inspirations
+                    </h3>
+                    <div className="space-y-4">
+                      {meals.filter(m => m.type === 'breakfast').map(meal => (
+                        <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex gap-2 flex-wrap">
+                              <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md ${meal.prepStyle === 'make-ahead' ? 'text-indigo-600 bg-indigo-50' : 'text-amber-600 bg-amber-50'}`}>
+                                {meal.prepStyle === 'make-ahead' ? 'Make-Ahead' : 'Fresh Morning'}
+                              </span>
+                              <span className="text-xs font-bold uppercase tracking-wider text-stone-600 bg-stone-100 px-2 py-1 rounded-md">
+                                {meal.portions} Portions
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => toggleFavorite(meal)}
+                                className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === meal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
+                                title={favorites.some(f => f.title === meal.title) ? "Remove from favorites" : "Add to favorites"}
+                              >
+                                <Heart size={18} fill={favorites.some(f => f.title === meal.title) ? "currentColor" : "none"} />
+                              </button>
+                              <button 
+                                onClick={() => handleSwapMeal(meal)}
+                                disabled={swappingMealId === meal.id}
+                                className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors disabled:opacity-50"
+                                title="Swap this meal"
+                              >
+                                <RefreshCw size={18} className={swappingMealId === meal.id ? "animate-spin" : ""} />
+                              </button>
+                            </div>
+                          </div>
+                          <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                          <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
+                          
+                          <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
+                            <div className="flex items-center gap-4 text-sm text-stone-500">
+                              <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
+                            </div>
+                            <button 
+                              onClick={() => startCooking(meal)}
+                              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                            >
+                              <Play size={16} fill="currentColor" />
+                              Start Cooking
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
-                      <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
-                      
-                      <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
-                        <div className="flex items-center gap-4 text-sm text-stone-500">
-                          <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
-                        </div>
-                        <button 
-                          onClick={() => startCooking(meal)}
-                          className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
-                        >
-                          <Play size={16} fill="currentColor" />
-                          Start Cooking
-                        </button>
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  </section>
+
+                  {/* Dinners Section */}
+                  <section>
+                    <h3 className="text-xl font-semibold mb-4 text-stone-800 flex items-center gap-2">
+                      <span className="text-2xl">🍲</span> Batch Dinners
+                    </h3>
+                    <div className="space-y-4">
+                      {meals.filter(m => m.type === 'dinner').map((meal, index) => (
+                        <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex gap-2 flex-wrap">
+                              <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
+                                Cook Day {index + 1}
+                              </span>
+                              <span className="text-xs font-bold uppercase tracking-wider text-stone-600 bg-stone-100 px-2 py-1 rounded-md">
+                                {meal.portions} Portions (Lasts 2-3 days)
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => toggleFavorite(meal)}
+                                className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === meal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
+                                title={favorites.some(f => f.title === meal.title) ? "Remove from favorites" : "Add to favorites"}
+                              >
+                                <Heart size={18} fill={favorites.some(f => f.title === meal.title) ? "currentColor" : "none"} />
+                              </button>
+                              <button 
+                                onClick={() => handleSwapMeal(meal)}
+                                disabled={swappingMealId === meal.id}
+                                className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors disabled:opacity-50"
+                                title="Swap this meal"
+                              >
+                                <RefreshCw size={18} className={swappingMealId === meal.id ? "animate-spin" : ""} />
+                              </button>
+                            </div>
+                          </div>
+                          <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                          <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
+                          
+                          <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
+                            <div className="flex items-center gap-4 text-sm text-stone-500">
+                              <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
+                            </div>
+                            <button 
+                              onClick={() => startCooking(meal)}
+                              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
+                            >
+                              <Play size={16} fill="currentColor" />
+                              Start Cooking
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 </div>
               )}
             </motion.div>
@@ -453,7 +509,7 @@ export default function App() {
                 <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
-                      {generatedPantryMeal.day}
+                      Pantry Creation
                     </span>
                     <button 
                       onClick={() => toggleFavorite(generatedPantryMeal)}
@@ -528,7 +584,7 @@ export default function App() {
   );
 }
 
-function CookingModeView({ meal, details, loading, onClose }: { meal: Meal, details: RecipeDetails | null, loading: boolean, onClose: () => void }) {
+function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void }) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [timers, setTimers] = useState<{ id: string; label: string; timeLeft: number; isActive: boolean; total: number }[]>([]);
 
@@ -547,18 +603,8 @@ function CookingModeView({ meal, details, loading, onClose }: { meal: Meal, deta
     return () => clearInterval(interval);
   }, []);
 
-  if (loading || !details) {
-    return (
-      <div className="min-h-screen bg-stone-900 text-white flex flex-col items-center justify-center p-6 text-center">
-        <RefreshCw size={48} className="animate-spin mb-6 text-emerald-400" />
-        <h2 className="text-2xl font-semibold mb-2">Analyzing Recipe...</h2>
-        <p className="text-stone-400 max-w-sm">Generating a smart, parallelized cooking plan to get dinner on the table in 30 minutes.</p>
-      </div>
-    );
-  }
-
-  const step = details.steps[currentStepIndex];
-  const progress = ((currentStepIndex + 1) / details.steps.length) * 100;
+  const step = meal.steps[currentStepIndex];
+  const progress = ((currentStepIndex + 1) / meal.steps.length) * 100;
   const existingTimer = timers.find(t => t.id === step.id);
 
   return (
@@ -570,7 +616,7 @@ function CookingModeView({ meal, details, loading, onClose }: { meal: Meal, deta
         </button>
         <div className="text-center">
           <h2 className="font-semibold text-lg">{meal.title}</h2>
-          <p className="text-xs text-emerald-400 font-medium">Step {currentStepIndex + 1} of {details.steps.length}</p>
+          <p className="text-xs text-emerald-400 font-medium">Step {currentStepIndex + 1} of {meal.steps.length}</p>
         </div>
         <div className="w-10"></div> {/* Spacer for centering */}
       </header>
@@ -713,15 +759,15 @@ function CookingModeView({ meal, details, loading, onClose }: { meal: Meal, deta
           </button>
           <button 
             onClick={() => {
-              if (currentStepIndex === details.steps.length - 1) {
+              if (currentStepIndex === meal.steps.length - 1) {
                 onClose();
               } else {
-                setCurrentStepIndex(prev => Math.min(details.steps.length - 1, prev + 1));
+                setCurrentStepIndex(prev => Math.min(meal.steps.length - 1, prev + 1));
               }
             }}
             className="flex-1 py-4 rounded-2xl bg-emerald-500 text-stone-900 font-bold text-lg flex items-center justify-center gap-2 hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-500/20"
           >
-            {currentStepIndex === details.steps.length - 1 ? (
+            {currentStepIndex === meal.steps.length - 1 ? (
               <>Finish Cooking <CheckCircle2 size={20} /></>
             ) : (
               <>Next Step <ArrowRight size={20} /></>
