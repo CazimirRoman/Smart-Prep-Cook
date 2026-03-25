@@ -269,6 +269,12 @@ export async function importRecipeFromUrl(url: string): Promise<Meal> {
 Convert all ingredients to metric units (grams, milliliters). DO NOT use cups, ounces, pounds, or spoons.
 Provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.
 
+CRITICAL: 
+1. Do not omit any ingredients or preparation steps found in the source. 
+2. Every ingredient listed in the "ingredients" section MUST be explicitly used or mentioned in at least one cooking step. 
+3. Preserve specific descriptors (e.g., "salted butter", "extra virgin olive oil") as they are important for the recipe's character.
+4. If a step involves adding an ingredient, name that ingredient clearly in the instruction.
+
 Classify the recipe into one of these types:
 - type: 'breakfast' or 'dinner'
 - prepStyle: 'make-ahead', 'fresh', or 'batch'

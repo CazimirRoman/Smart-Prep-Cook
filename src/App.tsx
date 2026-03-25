@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
 import { Meal, CategorizedGroceries } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, provider } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -45,12 +45,26 @@ export default function App() {
   
   const [activeCookingMeal, setActiveCookingMeal] = useState<Meal | null>(null);
   const [selectedMealForPreview, setSelectedMealForPreview] = useState<Meal | null>(null);
+  const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
   const [mealGroceriesState, setMealGroceriesState] = useState<{
     isOpen: boolean;
     meal: Meal | null;
     loading: boolean;
     groceries: CategorizedGroceries | null;
   }>({ isOpen: false, meal: null, loading: false, groceries: null });
+
+  const handleUpdateMeal = (updatedMeal: Meal) => {
+    const update = (prev: Meal[]) => prev.map(m => m.id === updatedMeal.id ? updatedMeal : m);
+    setMeals(update);
+    setFavorites(update);
+    if (generatedPantryMeal && generatedPantryMeal.id === updatedMeal.id) {
+      setGeneratedPantryMeal(updatedMeal);
+    }
+    if (selectedMealForPreview && selectedMealForPreview.id === updatedMeal.id) {
+      setSelectedMealForPreview(updatedMeal);
+    }
+    setEditingMeal(null);
+  };
 
   const handleViewMealGroceries = (meal: Meal) => {
     const list: CategorizedGroceries = {};
@@ -573,6 +587,13 @@ export default function App() {
                                 <Heart size={18} fill={favorites.some(f => f.title === meal.title) ? "currentColor" : "none"} />
                               </button>
                               <button 
+                                onClick={() => setEditingMeal(meal)}
+                                className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
+                                title="Edit this recipe"
+                              >
+                                <Pencil size={18} />
+                              </button>
+                              <button 
                                 onClick={() => handleSwapMeal(meal)}
                                 disabled={swappingMealId === meal.id}
                                 className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors disabled:opacity-50"
@@ -642,6 +663,13 @@ export default function App() {
                                 title={favorites.some(f => f.title === meal.title) ? "Remove from favorites" : "Add to favorites"}
                               >
                                 <Heart size={18} fill={favorites.some(f => f.title === meal.title) ? "currentColor" : "none"} />
+                              </button>
+                              <button 
+                                onClick={() => setEditingMeal(meal)}
+                                className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
+                                title="Edit this recipe"
+                              >
+                                <Pencil size={18} />
                               </button>
                               <button 
                                 onClick={() => handleSwapMeal(meal)}
@@ -837,13 +865,22 @@ export default function App() {
                     <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
                       Pantry Creation
                     </span>
-                    <button 
-                      onClick={() => toggleFavorite(generatedPantryMeal)}
-                      className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === generatedPantryMeal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
-                      title={favorites.some(f => f.title === generatedPantryMeal.title) ? "Remove from favorites" : "Add to favorites"}
-                    >
-                      <Heart size={18} fill={favorites.some(f => f.title === generatedPantryMeal.title) ? "currentColor" : "none"} />
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setEditingMeal(generatedPantryMeal)}
+                        className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
+                        title="Edit this recipe"
+                      >
+                        <Pencil size={18} />
+                      </button>
+                      <button 
+                        onClick={() => toggleFavorite(generatedPantryMeal)}
+                        className={`p-1.5 rounded-full transition-colors ${favorites.some(f => f.title === generatedPantryMeal.title) ? 'text-rose-500 hover:bg-rose-50' : 'text-stone-400 hover:text-rose-500 hover:bg-stone-100'}`}
+                        title={favorites.some(f => f.title === generatedPantryMeal.title) ? "Remove from favorites" : "Add to favorites"}
+                      >
+                        <Heart size={18} fill={favorites.some(f => f.title === generatedPantryMeal.title) ? "currentColor" : "none"} />
+                      </button>
+                    </div>
                   </div>
                   <h3 className="text-xl font-semibold mb-1">{generatedPantryMeal.title}</h3>
                   {generatedPantryMeal.lastCookedAt && (
@@ -944,6 +981,13 @@ export default function App() {
                           </div>
                           <div className="flex gap-2">
                             <button 
+                              onClick={() => setEditingMeal(meal)}
+                              className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
+                              title="Edit this recipe"
+                            >
+                              <Pencil size={18} />
+                            </button>
+                            <button 
                               onClick={() => toggleFavorite(meal)}
                               className="p-1.5 rounded-full transition-colors text-rose-500 hover:bg-rose-50"
                               title="Remove from favorites"
@@ -1043,6 +1087,14 @@ export default function App() {
               setActiveCookingMeal(selectedMealForPreview);
               setSelectedMealForPreview(null);
             }}
+            onEdit={() => setEditingMeal(selectedMealForPreview)}
+          />
+        )}
+        {editingMeal && (
+          <EditRecipeModal 
+            meal={editingMeal}
+            onClose={() => setEditingMeal(null)}
+            onSave={handleUpdateMeal}
           />
         )}
       </AnimatePresence>
@@ -1050,7 +1102,171 @@ export default function App() {
   );
 }
 
-function RecipeDetailModal({ meal, onClose, onStartCooking }: { meal: Meal, onClose: () => void, onStartCooking: () => void }) {
+function EditRecipeModal({ meal, onClose, onSave }: { meal: Meal, onClose: () => void, onSave: (meal: Meal) => void }) {
+  const [editedMeal, setEditedMeal] = useState<Meal>({ ...meal });
+
+  const handleIngredientChange = (index: number, value: string) => {
+    const newIngredients = [...editedMeal.ingredients];
+    if (typeof newIngredients[index] === 'string') {
+      newIngredients[index] = value;
+    } else {
+      (newIngredients[index] as any).name = value;
+    }
+    setEditedMeal({ ...editedMeal, ingredients: newIngredients });
+  };
+
+  const handleStepChange = (index: number, value: string) => {
+    const newSteps = [...editedMeal.steps];
+    newSteps[index].instruction = value;
+    setEditedMeal({ ...editedMeal, steps: newSteps });
+  };
+
+  const addIngredient = () => {
+    setEditedMeal({
+      ...editedMeal,
+      ingredients: [...editedMeal.ingredients, { name: '', category: 'Other', icon: '🛒' }]
+    });
+  };
+
+  const addStep = () => {
+    setEditedMeal({
+      ...editedMeal,
+      steps: [...editedMeal.steps, { id: crypto.randomUUID(), instruction: '' }]
+    });
+  };
+
+  const removeIngredient = (index: number) => {
+    setEditedMeal({
+      ...editedMeal,
+      ingredients: editedMeal.ingredients.filter((_, i) => i !== index)
+    });
+  };
+
+  const removeStep = (index: number) => {
+    setEditedMeal({
+      ...editedMeal,
+      steps: editedMeal.steps.filter((_, i) => i !== index)
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+      >
+        <div className="p-6 border-b border-stone-100 flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-stone-800">Edit Recipe</h2>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+            <X size={24} className="text-stone-400" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          <section>
+            <label className="block text-sm font-bold text-stone-500 uppercase tracking-wider mb-2">Recipe Title</label>
+            <input 
+              type="text" 
+              value={editedMeal.title}
+              onChange={(e) => setEditedMeal({ ...editedMeal, title: e.target.value })}
+              className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+            />
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Utensils size={20} className="text-emerald-500" />
+                Ingredients
+              </h3>
+              <button 
+                onClick={addIngredient}
+                className="text-emerald-600 hover:text-emerald-700 text-sm font-bold flex items-center gap-1"
+              >
+                <Plus size={16} /> Add Ingredient
+              </button>
+            </div>
+            <div className="space-y-2">
+              {editedMeal.ingredients.map((ing, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={typeof ing === 'string' ? ing : ing.name}
+                    onChange={(e) => handleIngredientChange(idx, e.target.value)}
+                    placeholder="Ingredient name and quantity"
+                    className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                  <button 
+                    onClick={() => removeIngredient(idx)}
+                    className="p-2 text-stone-400 hover:text-rose-500 transition-colors"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Clock size={20} className="text-emerald-500" />
+                Cooking Steps
+              </h3>
+              <button 
+                onClick={addStep}
+                className="text-emerald-600 hover:text-emerald-700 text-sm font-bold flex items-center gap-1"
+              >
+                <Plus size={16} /> Add Step
+              </button>
+            </div>
+            <div className="space-y-4">
+              {editedMeal.steps.map((step, idx) => (
+                <div key={idx} className="flex gap-2 items-start">
+                  <div className="flex-shrink-0 w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center font-bold text-stone-500 mt-1">
+                    {idx + 1}
+                  </div>
+                  <textarea 
+                    value={step.instruction}
+                    onChange={(e) => handleStepChange(idx, e.target.value)}
+                    placeholder="Step instruction"
+                    rows={2}
+                    className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-none"
+                  />
+                  <button 
+                    onClick={() => removeStep(idx)}
+                    className="p-2 text-stone-400 hover:text-rose-500 transition-colors mt-1"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="p-6 border-t border-stone-100 bg-stone-50 flex gap-4">
+          <button 
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-semibold hover:bg-white transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={() => onSave(editedMeal)}
+            className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors"
+          >
+            Save Changes
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit }: { meal: Meal, onClose: () => void, onStartCooking: () => void, onEdit: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
       <motion.div 
@@ -1062,11 +1278,19 @@ function RecipeDetailModal({ meal, onClose, onStartCooking }: { meal: Meal, onCl
         <div className="p-6 border-b border-stone-100 flex justify-between items-start">
           <div>
             <h2 className="text-2xl font-bold text-stone-800">{meal.title}</h2>
-            {meal.lastCookedAt && (
-              <p className="text-sm text-emerald-600 font-medium mt-1">
-                Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
-              </p>
-            )}
+            <div className="flex items-center gap-3 mt-1">
+              {meal.lastCookedAt && (
+                <p className="text-sm text-emerald-600 font-medium">
+                  Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
+                </p>
+              )}
+              <button 
+                onClick={onEdit}
+                className="text-stone-400 hover:text-stone-700 flex items-center gap-1 text-sm font-medium transition-colors"
+              >
+                <Pencil size={14} /> Edit Recipe
+              </button>
+            </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
             <X size={24} className="text-stone-400" />
