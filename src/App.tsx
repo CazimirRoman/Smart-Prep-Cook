@@ -109,6 +109,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const isCloudUpdate = React.useRef(false);
+  const initialLoadDone = React.useRef(false);
 
   enum OperationType {
     CREATE = 'create',
@@ -182,6 +183,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthReady) return;
+    
     if (!user) {
       // Load from local storage if not logged in
       const savedMeals = localStorage.getItem('smart-cook-meals');
@@ -192,23 +194,31 @@ export default function App() {
       if (savedPantry) setPantryIngredients(JSON.parse(savedPantry));
       const savedFavorites = localStorage.getItem('smart-cook-favorites');
       if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+      
+      initialLoadDone.current = true;
       return;
     }
 
+    initialLoadDone.current = false; // Reset for new user
+
     const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+      isCloudUpdate.current = true;
+      
       if (docSnap.exists()) {
         const data = docSnap.data();
-        isCloudUpdate.current = true;
         
         if (data.meals) setMeals(JSON.parse(data.meals));
         if (data.groceries) setGroceries(JSON.parse(data.groceries));
         if (data.pantryIngredients) setPantryIngredients(data.pantryIngredients);
         if (data.favorites) setFavorites(JSON.parse(data.favorites));
-        
-        setTimeout(() => {
-          isCloudUpdate.current = false;
-        }, 100);
       }
+      
+      // Allow React to process state updates before enabling writes
+      setTimeout(() => {
+        isCloudUpdate.current = false;
+        initialLoadDone.current = true;
+      }, 100);
+      
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
@@ -217,7 +227,7 @@ export default function App() {
   }, [user, isAuthReady]);
 
   useEffect(() => {
-    if (isCloudUpdate.current) return;
+    if (!isAuthReady || !initialLoadDone.current || isCloudUpdate.current) return;
     
     if (user) {
       const saveData = async () => {
@@ -241,13 +251,13 @@ export default function App() {
       localStorage.setItem('smart-cook-groceries', JSON.stringify(groceries));
       localStorage.setItem('smart-cook-pantry', JSON.stringify(pantryIngredients));
     }
-  }, [meals, groceries, pantryIngredients, favorites, user]);
+  }, [meals, groceries, pantryIngredients, favorites, user, isAuthReady]);
 
   useEffect(() => {
-    if (isAuthReady && meals.length === 0) {
+    if (isAuthReady && initialLoadDone.current && meals.length === 0) {
       loadInitialPlan();
     }
-  }, [isAuthReady]);
+  }, [isAuthReady, meals.length]);
 
   const loadInitialPlan = async () => {
     setLoadingMeals(true);
@@ -421,6 +431,20 @@ export default function App() {
     );
   }
 
+  const handleSignIn = async () => {
+    setError(null);
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (e: any) {
+      console.error("Sign in error:", e);
+      if (e.code === 'auth/unauthorized-domain') {
+        setError("Domeniul nu este autorizat în Firebase. Adaugă domeniul curent în Firebase Console > Authentication > Settings > Authorized domains.");
+      } else {
+        setError(`Eroare la autentificare: ${e.message}`);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-24">
       {/* Header */}
@@ -443,7 +467,7 @@ export default function App() {
               </button>
             ) : (
               <button 
-                onClick={() => signInWithPopup(auth, provider)}
+                onClick={handleSignIn}
                 className="flex items-center gap-2 text-sm bg-stone-100 text-stone-700 px-3 py-1.5 rounded-lg hover:bg-stone-200 transition-colors font-medium"
               >
                 <LogIn size={16} />
