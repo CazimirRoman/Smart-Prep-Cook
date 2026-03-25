@@ -44,6 +44,7 @@ export default function App() {
   const [swappingMealId, setSwappingMealId] = useState<string | null>(null);
   
   const [activeCookingMeal, setActiveCookingMeal] = useState<Meal | null>(null);
+  const [selectedMealForPreview, setSelectedMealForPreview] = useState<Meal | null>(null);
   const [mealGroceriesState, setMealGroceriesState] = useState<{
     isOpen: boolean;
     meal: Meal | null;
@@ -63,6 +64,18 @@ export default function App() {
       }
     });
     setMealGroceriesState({ isOpen: true, meal, loading: false, groceries: list });
+  };
+
+  const handleFinishCooking = (meal: Meal) => {
+    const now = new Date().toISOString();
+    const updateMeal = (m: Meal) => m.id === meal.id ? { ...m, lastCookedAt: now } : m;
+    
+    setMeals(prev => prev.map(updateMeal));
+    setFavorites(prev => prev.map(updateMeal));
+    if (generatedPantryMeal && generatedPantryMeal.id === meal.id) {
+      setGeneratedPantryMeal(prev => prev ? { ...prev, lastCookedAt: now } : null);
+    }
+    setActiveCookingMeal(null);
   };
 
   // Pantry State
@@ -426,7 +439,8 @@ export default function App() {
     return (
       <CookingModeView 
         meal={activeCookingMeal} 
-        onClose={closeCookingMode} 
+        onClose={() => setActiveCookingMeal(null)} 
+        onFinish={handleFinishCooking}
       />
     );
   }
@@ -569,6 +583,11 @@ export default function App() {
                             </div>
                           </div>
                           <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                          {meal.lastCookedAt && (
+                            <p className="text-xs text-emerald-600 font-medium mb-1">
+                              Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
+                            </p>
+                          )}
                           <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
                           
                           <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
@@ -584,7 +603,7 @@ export default function App() {
                                 <ShoppingCart size={16} />
                               </button>
                               <button 
-                                onClick={() => startCooking(meal)}
+                                onClick={() => setSelectedMealForPreview(meal)}
                                 className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
                               >
                                 <Play size={16} fill="currentColor" />
@@ -635,6 +654,11 @@ export default function App() {
                             </div>
                           </div>
                           <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                          {meal.lastCookedAt && (
+                            <p className="text-xs text-emerald-600 font-medium mb-1">
+                              Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
+                            </p>
+                          )}
                           <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
                           
                           <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
@@ -650,7 +674,7 @@ export default function App() {
                                 <ShoppingCart size={16} />
                               </button>
                               <button 
-                                onClick={() => startCooking(meal)}
+                                onClick={() => setSelectedMealForPreview(meal)}
                                 className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
                               >
                                 <Play size={16} fill="currentColor" />
@@ -822,6 +846,11 @@ export default function App() {
                     </button>
                   </div>
                   <h3 className="text-xl font-semibold mb-1">{generatedPantryMeal.title}</h3>
+                  {generatedPantryMeal.lastCookedAt && (
+                    <p className="text-xs text-emerald-600 font-medium mb-1">
+                      Last cooked: {new Date(generatedPantryMeal.lastCookedAt).toLocaleDateString()}
+                    </p>
+                  )}
                   <p className="text-stone-500 text-sm mb-4">{generatedPantryMeal.description}</p>
                   
                   <div className="mb-4 bg-stone-50 p-4 rounded-xl border border-stone-100">
@@ -844,7 +873,7 @@ export default function App() {
                         <ShoppingCart size={16} />
                       </button>
                       <button 
-                        onClick={() => startCooking(generatedPantryMeal)}
+                        onClick={() => setSelectedMealForPreview(generatedPantryMeal)}
                         className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
                       >
                         <Play size={16} fill="currentColor" />
@@ -924,6 +953,11 @@ export default function App() {
                           </div>
                         </div>
                         <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
+                        {meal.lastCookedAt && (
+                          <p className="text-xs text-emerald-600 font-medium mb-1">
+                            Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
+                          </p>
+                        )}
                         <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
                         
                         <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
@@ -939,7 +973,7 @@ export default function App() {
                               <ShoppingCart size={16} />
                             </button>
                             <button 
-                              onClick={() => startCooking(meal)}
+                              onClick={() => setSelectedMealForPreview(meal)}
                               className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
                             >
                               <Play size={16} fill="currentColor" />
@@ -999,11 +1033,113 @@ export default function App() {
           </button>
         </div>
       </nav>
+
+      <AnimatePresence>
+        {selectedMealForPreview && (
+          <RecipeDetailModal 
+            meal={selectedMealForPreview} 
+            onClose={() => setSelectedMealForPreview(null)}
+            onStartCooking={() => {
+              setActiveCookingMeal(selectedMealForPreview);
+              setSelectedMealForPreview(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void }) {
+function RecipeDetailModal({ meal, onClose, onStartCooking }: { meal: Meal, onClose: () => void, onStartCooking: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+      >
+        <div className="p-6 border-b border-stone-100 flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold text-stone-800">{meal.title}</h2>
+            {meal.lastCookedAt && (
+              <p className="text-sm text-emerald-600 font-medium mt-1">
+                Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+            <X size={24} className="text-stone-400" />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Utensils size={20} className="text-emerald-500" />
+                Mise en Place (Ingredients)
+              </h3>
+              <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                {meal.portions} Portions
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {meal.ingredients.map((ing, idx) => (
+                <div key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
+                  <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
+                  <span className="text-stone-700 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Clock size={20} className="text-emerald-500" />
+              Cooking Steps Preview
+            </h3>
+            <div className="space-y-4">
+              {meal.steps.map((step, idx) => (
+                <div key={idx} className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center font-bold text-stone-500">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-stone-700 leading-relaxed font-medium">{step.instruction}</p>
+                    {step.durationMinutes && (
+                      <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider mt-1 block">
+                        ⏱️ {step.durationMinutes} min
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="p-6 border-t border-stone-100 bg-stone-50 flex gap-4">
+          <button 
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-semibold hover:bg-white transition-colors"
+          >
+            Close
+          </button>
+          <button 
+            onClick={onStartCooking}
+            className="flex-1 py-3 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors flex items-center justify-center gap-2"
+          >
+            <Play size={18} fill="currentColor" />
+            Start Interactive Cooking
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function CookingModeView({ meal, onClose, onFinish }: { meal: Meal, onClose: () => void, onFinish: (meal: Meal) => void }) {
   const steps = useMemo(() => {
     if (meal.miseEnPlace && meal.miseEnPlace.length > 0) {
       return [
@@ -1159,6 +1295,23 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
                 </div>
               )}
 
+              {step.id === 'mise-en-place' && (
+                <div className="mb-8">
+                  <h3 className="text-emerald-400 font-semibold mb-4 flex items-center gap-2">
+                    <ShoppingCart size={18} />
+                    Ingredients to gather:
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {meal.ingredients.map((ing, idx) => (
+                      <div key={idx} className="flex items-center gap-3 p-3 bg-stone-800/50 rounded-xl border border-stone-700">
+                        <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
+                        <span className="text-stone-300 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {step.parallelTasks && step.parallelTasks.length > 0 && (
                 <div className="bg-emerald-900/20 border border-emerald-800/50 rounded-2xl p-6">
                   <h3 className="text-emerald-400 font-semibold mb-4 flex items-center gap-2">
@@ -1193,7 +1346,7 @@ function CookingModeView({ meal, onClose }: { meal: Meal, onClose: () => void })
           <button 
             onClick={() => {
               if (currentStepIndex === steps.length - 1) {
-                onClose();
+                onFinish(meal);
               } else {
                 setCurrentStepIndex(prev => Math.min(steps.length - 1, prev + 1));
               }

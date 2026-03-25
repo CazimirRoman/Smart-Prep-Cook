@@ -23,6 +23,7 @@ export interface Meal {
   ingredients: Ingredient[] | string[];
   miseEnPlace: string[];
   steps: CookingStep[];
+  lastCookedAt?: string;
 }
 
 export interface CategorizedGroceries {
