@@ -101,9 +101,10 @@ export default function App() {
 
   const loadInitialPlan = async () => {
     setLoadingMeals(true);
+    setGroceries({}); // Reset groceries list when regenerating
     setError(null);
     try {
-      const newMeals = await generateMealPlan(favorites);
+      const newMeals = await generateMealPlan(favorites, meals);
       if (!newMeals || newMeals.length === 0) {
         setError("AI returned an empty meal plan. Please try again.");
       } else {
@@ -133,6 +134,7 @@ export default function App() {
     try {
       const newMeal = await swapMeal(meal);
       setMeals(prev => prev.map(m => m.id === meal.id ? newMeal : m));
+      setGroceries({}); // Reset groceries list when a meal is swapped
     } catch (e) {
       console.error(e);
     } finally {
@@ -465,10 +467,10 @@ export default function App() {
                 <h2 className="text-2xl font-semibold">Grocery List</h2>
                 <button 
                   onClick={handleGenerateGroceries}
-                  disabled={loadingGroceries || meals.length === 0}
+                  disabled={loadingGroceries || meals.length === 0 || loadingMeals}
                   className="text-sm bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-200 transition-colors disabled:opacity-50 font-medium"
                 >
-                  {loadingGroceries ? "Generating..." : "Regenerate List"}
+                  {loadingGroceries ? "Generating..." : loadingMeals ? "Waiting for Meal Plan..." : "Regenerate List"}
                 </button>
               </div>
 
@@ -483,10 +485,10 @@ export default function App() {
                   <p className="mb-4">Your list is empty.</p>
                   <button 
                     onClick={handleGenerateGroceries}
-                    disabled={meals.length === 0}
+                    disabled={meals.length === 0 || loadingMeals}
                     className="bg-stone-900 text-white px-6 py-2 rounded-xl font-medium hover:bg-stone-800 transition-colors disabled:opacity-50"
                   >
-                    Generate from Meal Plan
+                    {loadingMeals ? "Waiting for Meal Plan..." : "Generate from Meal Plan"}
                   </button>
                 </div>
               ) : (

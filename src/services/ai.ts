@@ -25,26 +25,66 @@ const stepsSchema = {
   }
 };
 
-export async function generateMealPlan(favorites: Meal[] = []): Promise<Meal[]> {
-  let prompt = `Generate a weekly meal plan for 2 people with a specific batch-cooking and creative breakfast routine.
-Return EXACTLY 6 meals:
-- 2 "Batch Dinners": Hearty, fridge-friendly meals (stews, curries, casseroles, hearty pastas) that yield 4-6 portions each and last for 2-3 days. Cook time can be 45-60 mins.
-- 2 "Make-Ahead Breakfasts": Creative breakfasts prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.
-- 2 "Fresh Breakfasts": Creative, interesting morning meals made fresh (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.
+export async function generateMealPlan(favorites: Meal[] = [], currentMeals: Meal[] = []): Promise<Meal[]> {
+  // Find which current meals are favorited
+  let keptMeals = currentMeals.filter(m => favorites.some(f => f.title === m.title));
+  
+  // If we have no kept meals from the current plan, but we have favorites, randomly pick up to 2
+  if (keptMeals.length === 0 && favorites.length > 0) {
+    const shuffledFavs = [...favorites].sort(() => 0.5 - Math.random());
+    // Try to pick up to 2 favorites that fit the criteria
+    let added = 0;
+    for (const fav of shuffledFavs) {
+      if (added >= 2) break;
+      // Make sure we don't exceed the required amounts
+      const batchDinners = keptMeals.filter(m => m.type === 'dinner' && m.prepStyle === 'batch').length;
+      const makeAheadBreakfasts = keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'make-ahead').length;
+      const freshBreakfasts = keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'fresh').length;
+      
+      if (fav.type === 'dinner' && fav.prepStyle === 'batch' && batchDinners < 2) {
+        keptMeals.push(fav);
+        added++;
+      } else if (fav.type === 'breakfast' && fav.prepStyle === 'make-ahead' && makeAheadBreakfasts < 2) {
+        keptMeals.push(fav);
+        added++;
+      } else if (fav.type === 'breakfast' && fav.prepStyle === 'fresh' && freshBreakfasts < 2) {
+        keptMeals.push(fav);
+        added++;
+      }
+    }
+  }
+  
+  // Count how many of each type we already have
+  let batchDinnersNeeded = 2 - keptMeals.filter(m => m.type === 'dinner' && m.prepStyle === 'batch').length;
+  let makeAheadBreakfastsNeeded = 2 - keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'make-ahead').length;
+  let freshBreakfastsNeeded = 2 - keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'fresh').length;
+  
+  // Ensure we don't ask for negative amounts
+  batchDinnersNeeded = Math.max(0, batchDinnersNeeded);
+  makeAheadBreakfastsNeeded = Math.max(0, makeAheadBreakfastsNeeded);
+  freshBreakfastsNeeded = Math.max(0, freshBreakfastsNeeded);
+  
+  const totalNeeded = batchDinnersNeeded + makeAheadBreakfastsNeeded + freshBreakfastsNeeded;
+  
+  if (totalNeeded === 0) {
+    return keptMeals;
+  }
 
+  const previousTitles = currentMeals.map(m => m.title).join(", ");
+
+  let prompt = `Generate a meal plan for 2 people with a specific batch-cooking and creative breakfast routine.
+Return EXACTLY ${totalNeeded} meals:
+${batchDinnersNeeded > 0 ? `- ${batchDinnersNeeded} "Batch Dinners": Hearty, fridge-friendly meals (stews, curries, casseroles, hearty pastas) that yield 4-6 portions each and last for 2-3 days. Cook time can be 45-60 mins.\n` : ''}${makeAheadBreakfastsNeeded > 0 ? `- ${makeAheadBreakfastsNeeded} "Make-Ahead Breakfasts": Creative breakfasts prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.\n` : ''}${freshBreakfastsNeeded > 0 ? `- ${freshBreakfastsNeeded} "Fresh Breakfasts": Creative, interesting morning meals made fresh (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.\n` : ''}
 For EACH recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.`;
-  
-  if (favorites.length > 0) {
-    const favTitles = favorites.map(f => f.title).join(", ");
-    prompt += `\n\nHere are some of the user's favorite meals: ${favTitles}. Please include 1 or 2 of these favorites if they fit the criteria, and generate new ideas for the rest.`;
-  }
+IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.
+${previousTitles ? `DO NOT generate any of these previous meals: ${previousTitles}. ` : ''}Be creative and varied!`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
     contents: prompt,
     config: {
+      temperature: 0.9,
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -98,7 +138,7 @@ IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NO
 
   try {
     const parsed = JSON.parse(response.text);
-    return parsed.meals || [];
+    return [...keptMeals, ...(parsed.meals || [])];
   } catch (e) {
     console.error("Failed to parse AI response:", response.text);
     throw new Error("The AI returned an invalid response format. Please try again.");
