@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients } from './services/ai';
+import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
 import { Meal, CategorizedGroceries } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth, db, provider } from './firebase';
+import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { doc, onSnapshot, setDoc, serverTimestamp, getDocFromServer } from 'firebase/firestore';
 
 const COMMON_INGREDIENTS = [
   { name: 'Chicken', icon: '🍗' },
@@ -77,27 +80,174 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  useEffect(() => {
-    localStorage.setItem('smart-cook-favorites', JSON.stringify(favorites));
-  }, [favorites]);
+  const [importUrl, setImportUrl] = useState('');
+  const [importingRecipe, setImportingRecipe] = useState(false);
+
+  const handleImportRecipe = async () => {
+    if (!importUrl) return;
+    setImportingRecipe(true);
+    setError(null);
+    try {
+      const meal = await importRecipeFromUrl(importUrl);
+      setFavorites(prev => {
+        if (!prev.some(f => f.title === meal.title)) {
+          return [...prev, meal];
+        }
+        return prev;
+      });
+      setImportUrl('');
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to import recipe from URL.");
+    } finally {
+      setImportingRecipe(false);
+    }
+  };
+
+  const [planTab, setPlanTab] = useState<'morning' | 'dinner'>('morning');
+
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const isCloudUpdate = React.useRef(false);
+
+  enum OperationType {
+    CREATE = 'create',
+    UPDATE = 'update',
+    DELETE = 'delete',
+    LIST = 'list',
+    GET = 'get',
+    WRITE = 'write',
+  }
+
+  interface FirestoreErrorInfo {
+    error: string;
+    operationType: OperationType;
+    path: string | null;
+    authInfo: {
+      userId: string | undefined;
+      email: string | null | undefined;
+      emailVerified: boolean | undefined;
+      isAnonymous: boolean | undefined;
+      tenantId: string | null | undefined;
+      providerInfo: {
+        providerId: string;
+        displayName: string | null;
+        email: string | null;
+        photoUrl: string | null;
+      }[];
+    }
+  }
+
+  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+        tenantId: auth.currentUser?.tenantId,
+        providerInfo: auth.currentUser?.providerData.map(provider => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL
+        })) || []
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    throw new Error(JSON.stringify(errInfo));
+  };
 
   useEffect(() => {
-    localStorage.setItem('smart-cook-meals', JSON.stringify(meals));
-  }, [meals]);
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    }
+    testConnection();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('smart-cook-groceries', JSON.stringify(groceries));
-  }, [groceries]);
+    if (!isAuthReady) return;
+    if (!user) {
+      // Load from local storage if not logged in
+      const savedMeals = localStorage.getItem('smart-cook-meals');
+      if (savedMeals) setMeals(JSON.parse(savedMeals));
+      const savedGroceries = localStorage.getItem('smart-cook-groceries');
+      if (savedGroceries) setGroceries(JSON.parse(savedGroceries));
+      const savedPantry = localStorage.getItem('smart-cook-pantry');
+      if (savedPantry) setPantryIngredients(JSON.parse(savedPantry));
+      const savedFavorites = localStorage.getItem('smart-cook-favorites');
+      if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+      return;
+    }
+
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        isCloudUpdate.current = true;
+        
+        if (data.meals) setMeals(JSON.parse(data.meals));
+        if (data.groceries) setGroceries(JSON.parse(data.groceries));
+        if (data.pantryIngredients) setPantryIngredients(data.pantryIngredients);
+        if (data.favorites) setFavorites(JSON.parse(data.favorites));
+        
+        setTimeout(() => {
+          isCloudUpdate.current = false;
+        }, 100);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+    });
+
+    return () => unsubscribe();
+  }, [user, isAuthReady]);
 
   useEffect(() => {
-    localStorage.setItem('smart-cook-pantry', JSON.stringify(pantryIngredients));
-  }, [pantryIngredients]);
+    if (isCloudUpdate.current) return;
+    
+    if (user) {
+      const saveData = async () => {
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            meals: JSON.stringify(meals),
+            groceries: JSON.stringify(groceries),
+            pantryIngredients,
+            favorites: JSON.stringify(favorites),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+        }
+      };
+      saveData();
+    } else {
+      localStorage.setItem('smart-cook-favorites', JSON.stringify(favorites));
+      localStorage.setItem('smart-cook-meals', JSON.stringify(meals));
+      localStorage.setItem('smart-cook-groceries', JSON.stringify(groceries));
+      localStorage.setItem('smart-cook-pantry', JSON.stringify(pantryIngredients));
+    }
+  }, [meals, groceries, pantryIngredients, favorites, user]);
 
   useEffect(() => {
-    if (meals.length === 0) {
+    if (isAuthReady && meals.length === 0) {
       loadInitialPlan();
     }
-  }, []);
+  }, [isAuthReady]);
 
   const loadInitialPlan = async () => {
     setLoadingMeals(true);
@@ -282,6 +432,25 @@ export default function App() {
             </div>
             <h1 className="text-xl font-semibold tracking-tight">Smart Prep & Cook</h1>
           </div>
+          <div>
+            {user ? (
+              <button 
+                onClick={() => signOut(auth)}
+                className="flex items-center gap-2 text-sm text-stone-500 hover:text-stone-800 transition-colors"
+              >
+                <img src={user.photoURL || ''} alt="" className="w-6 h-6 rounded-full" />
+                <LogOut size={16} />
+              </button>
+            ) : (
+              <button 
+                onClick={() => signInWithPopup(auth, provider)}
+                className="flex items-center gap-2 text-sm bg-stone-100 text-stone-700 px-3 py-1.5 rounded-lg hover:bg-stone-200 transition-colors font-medium"
+              >
+                <LogIn size={16} />
+                Sign In
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -324,14 +493,29 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="space-y-10">
-                  {/* Breakfasts Section */}
-                  <section>
-                    <h3 className="text-xl font-semibold mb-4 text-stone-800 flex items-center gap-2">
-                      <span className="text-2xl">🌅</span> Morning Inspirations
-                    </h3>
-                    <div className="space-y-4">
-                      {meals.filter(m => m.type === 'breakfast').map(meal => (
+                <div className="space-y-6">
+                  <div className="flex bg-stone-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setPlanTab('morning')}
+                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${planTab === 'morning' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
+                    >
+                      Morning Inspirations
+                    </button>
+                    <button
+                      onClick={() => setPlanTab('dinner')}
+                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${planTab === 'dinner' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
+                    >
+                      Batch Dinners
+                    </button>
+                  </div>
+
+                  {planTab === 'morning' && (
+                    <section>
+                      <h3 className="text-xl font-semibold mb-4 text-stone-800 flex items-center gap-2">
+                        <span className="text-2xl">🌅</span> Morning Inspirations
+                      </h3>
+                      <div className="space-y-4">
+                        {meals.filter(m => m.type === 'breakfast').map(meal => (
                         <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex justify-between items-start mb-2">
                               <div className="flex gap-2 flex-wrap">
@@ -388,8 +572,10 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+                  )}
 
                   {/* Dinners Section */}
+                  {planTab === 'dinner' && (
                   <section>
                     <h3 className="text-xl font-semibold mb-4 text-stone-800 flex items-center gap-2">
                       <span className="text-2xl">🍲</span> Batch Dinners
@@ -452,6 +638,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -655,7 +842,40 @@ export default function App() {
               <div className="flex justify-between items-center">
                 <h2 className="text-2xl font-bold text-stone-800">Your Favorites</h2>
               </div>
+
+              {error && (
+                <div className="bg-rose-50 text-rose-600 p-4 rounded-xl text-sm border border-rose-200">
+                  {error}
+                </div>
+              )}
               
+              <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
+                <h3 className="text-lg font-semibold mb-2 text-stone-800">Import Recipe</h3>
+                <p className="text-sm text-stone-500 mb-4">Paste a URL to any recipe online, and we'll convert it to metric, optimize the steps, and save it to your favorites.</p>
+                <div className="flex gap-2">
+                  <input 
+                    type="url" 
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="https://example.com/recipe"
+                    className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && importUrl && !importingRecipe) {
+                        handleImportRecipe();
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={handleImportRecipe}
+                    disabled={!importUrl || importingRecipe}
+                    className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-stone-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {importingRecipe ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
+                    Import
+                  </button>
+                </div>
+              </div>
+
               {favorites.length > 0 ? (
                 <div className="space-y-4">
                   {favorites.map(meal => (

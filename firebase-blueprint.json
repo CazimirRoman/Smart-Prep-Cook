@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User data including meal plans, groceries, pantry, and favorites.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The user's unique ID."
+        },
+        "meals": {
+          "type": "string",
+          "description": "JSON stringified array of Meal objects."
+        },
+        "groceries": {
+          "type": "string",
+          "description": "JSON stringified CategorizedGroceries object."
+        },
+        "pantryIngredients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of ingredients in the user's pantry."
+        },
+        "favorites": {
+          "type": "string",
+          "description": "JSON stringified array of favorite Meal objects."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last update."
+        }
+      },
+      "required": ["uid"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user-specific app data."
+    }
+  }
+}

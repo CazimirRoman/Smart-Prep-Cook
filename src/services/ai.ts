@@ -263,6 +263,68 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
   return categorized;
 }
 
+export async function importRecipeFromUrl(url: string): Promise<Meal> {
+  const prompt = `Extract the recipe from this URL: ${url}
+  
+Convert all ingredients to metric units (grams, milliliters). DO NOT use cups, ounces, pounds, or spoons.
+Provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.
+
+Classify the recipe into one of these types:
+- type: 'breakfast' or 'dinner'
+- prepStyle: 'make-ahead', 'fresh', or 'batch'
+- portions: number of portions the recipe yields
+
+Return the recipe matching the JSON schema.`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      tools: [{ urlContext: {} }],
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          type: { type: Type.STRING, description: "'breakfast' or 'dinner'" },
+          prepStyle: { type: Type.STRING, description: "'make-ahead', 'fresh', or 'batch'" },
+          portions: { type: Type.NUMBER, description: "Number of portions the recipe yields" },
+          title: { type: Type.STRING },
+          description: { type: Type.STRING },
+          prepTime: { type: Type.NUMBER, description: "Time in minutes" },
+          cookTime: { type: Type.NUMBER, description: "Time in minutes" },
+          ingredients: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING, description: "Ingredient name with quantity" },
+                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
+                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
+              },
+              required: ["name", "category", "icon"]
+            },
+            description: "List of ingredients with quantities, categories, and icons"
+          },
+          miseEnPlace: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
+          },
+          steps: stepsSchema
+        },
+        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
+      }
+    }
+  });
+
+  if (!response.text) {
+    throw new Error("Empty response from AI");
+  }
+
+  return JSON.parse(response.text);
+}
+
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
   const response = await ai.models.generateContent({
     model: MODEL,
