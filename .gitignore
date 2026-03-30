@@ -4,5 +4,8 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env*
-!.env.example
+.env
+!.env
+.idea/
+.env.local
+.claude/settings.local.json
