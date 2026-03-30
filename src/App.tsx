@@ -135,6 +135,7 @@ export default function App() {
 
   const [importUrl, setImportUrl] = useState('');
   const [importingRecipe, setImportingRecipe] = useState(false);
+  const [importStatus, setImportStatus] = useState('');
   const [imageUrlInputForMealId, setImageUrlInputForMealId] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
@@ -145,9 +146,10 @@ export default function App() {
   const handleImportRecipe = async () => {
     if (!importUrl) return;
     setImportingRecipe(true);
+    setImportStatus('');
     setError(null);
     try {
-      const meal = await importRecipeFromUrl(importUrl);
+      const meal = await importRecipeFromUrl(importUrl, setImportStatus);
       meal.sourceUrl = importUrl;
       setFavorites(prev => {
         if (!prev.some(f => f.title === meal.title)) {
@@ -161,15 +163,17 @@ export default function App() {
       setError(e.message || "Failed to import recipe from URL.");
     } finally {
       setImportingRecipe(false);
+      setImportStatus('');
     }
   };
 
   const handleReplaceWithUrl = async (meal: Meal) => {
     if (!replaceUrlInput.trim()) return;
     setReplacingRecipeMealId(meal.id);
+    setImportStatus('');
     setError(null);
     try {
-      const imported = await importRecipeFromUrl(replaceUrlInput.trim());
+      const imported = await importRecipeFromUrl(replaceUrlInput.trim(), setImportStatus);
       const updatedMeal: Meal = {
         ...imported,
         id: meal.id,
@@ -186,6 +190,7 @@ export default function App() {
       setError(e.message || "Failed to import recipe from URL.");
     } finally {
       setReplacingRecipeMealId(null);
+      setImportStatus('');
     }
   };
 
@@ -1050,6 +1055,12 @@ export default function App() {
                     Import
                   </button>
                 </div>
+                {importStatus && importingRecipe && (
+                  <div className="flex items-center gap-2 mt-3 text-sm text-emerald-700">
+                    <RefreshCw size={14} className="animate-spin" />
+                    {importStatus}
+                  </div>
+                )}
               </div>
 
               {favorites.length > 0 ? (
@@ -1214,6 +1225,12 @@ export default function App() {
                                 <X size={18} />
                               </button>
                             </div>
+                            {importStatus && replacingRecipeMealId === meal.id && (
+                              <div className="flex items-center gap-2 mt-2 text-xs text-emerald-700">
+                                <RefreshCw size={12} className="animate-spin" />
+                                {importStatus}
+                              </div>
+                            )}
                           </div>
                         )}
                         <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>

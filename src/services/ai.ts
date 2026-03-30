@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, UrlRetrievalStatus } from "@google/genai";
 import { Meal, CategorizedGroceries } from "../types";
 
 // @ts-ignore
@@ -6,6 +6,29 @@ const API_KEY = process.env.GEMINI_API_KEY || (typeof import.meta !== 'undefined
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 const MODEL = "gemini-3-flash-preview";
+
+async function generateWithRetry(
+  args: Parameters<typeof ai.models.generateContent>[0],
+  onProgress?: (msg: string) => void,
+) {
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await ai.models.generateContent(args);
+    } catch (e: any) {
+      const status = e?.status ?? e?.error?.code;
+      if ((status === 503 || status === 429) && attempt < maxRetries) {
+        const delay = (attempt + 1) * 3000;
+        console.warn(`[AI] Retrying after ${status} (attempt ${attempt + 1}/${maxRetries})...`);
+        onProgress?.("Server busy, retrying...");
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("Unreachable");
+}
 
 const stepsSchema = {
   type: Type.ARRAY,
@@ -263,15 +286,66 @@ export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGro
   return categorized;
 }
 
-export async function importRecipeFromUrl(url: string): Promise<Meal> {
-  const prompt = `Extract the recipe from this URL: ${url}
-  
+export async function importRecipeFromUrl(url: string, onProgress?: (msg: string) => void): Promise<Meal> {
+  // Step 1: Fetch URL content via urlContext (no structured output — they conflict)
+  onProgress?.("Fetching recipe from URL...");
+  console.time('[import] Step 1: urlContext fetch');
+  const fetchResponse = await generateWithRetry({
+    model: MODEL,
+    contents: `Visit this URL and extract ONLY the recipe data: ${url}
+
+Be concise. Return:
+- Title
+- Ingredients (name + quantity, one per line)
+- Steps (numbered, brief)
+- IMAGE_URL: <the main recipe photo URL from og:image, JSON-LD, or hero image>`,
+    config: {
+      tools: [{ urlContext: {} }]
+    }
+  }, onProgress);
+
+  console.timeEnd('[import] Step 1: urlContext fetch');
+  console.log('[import] URL metadata:', JSON.stringify(fetchResponse.candidates?.[0]?.urlContextMetadata, null, 2));
+  console.log('[import] Step 1 response length:', fetchResponse.text?.length ?? 0, 'chars');
+
+  // Validate the URL was actually fetched
+  const urlMetadata = fetchResponse.candidates?.[0]?.urlContextMetadata?.urlMetadata;
+  if (urlMetadata) {
+    const failed = urlMetadata.find(m => m.urlRetrievalStatus !== UrlRetrievalStatus.URL_RETRIEVAL_STATUS_SUCCESS);
+    if (failed) {
+      const status = failed.urlRetrievalStatus;
+      if (status === UrlRetrievalStatus.URL_RETRIEVAL_STATUS_PAYWALL) {
+        throw new Error("Could not import recipe: the page is behind a paywall.");
+      } else if (status === UrlRetrievalStatus.URL_RETRIEVAL_STATUS_UNSAFE) {
+        throw new Error("Could not import recipe: the URL was flagged as unsafe.");
+      } else {
+        throw new Error("Could not fetch the recipe URL. Please check the link and try again.");
+      }
+    }
+  }
+
+  const rawRecipeText = fetchResponse.text;
+  if (!rawRecipeText) {
+    throw new Error("Could not extract recipe content from the URL. Please check the link and try again.");
+  }
+
+  // Extract image URL if the model found one
+  const imageMatch = rawRecipeText.match(/IMAGE_URL:\s*(https?:\/\/[^\s]+)/);
+  const extractedImageUrl = imageMatch?.[1] || undefined;
+
+  // Step 2: Structure the extracted text into the Meal JSON schema
+  onProgress?.("Recipe found! Converting to metric and optimizing steps...");
+  console.time('[import] Step 2: structure into JSON');
+  const structureResponse = await generateWithRetry({
+    model: MODEL,
+    contents: `Convert the following recipe into the required JSON format.
+
 Convert all ingredients to metric units (grams, milliliters). DO NOT use cups, ounces, pounds, or spoons.
 Provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.
 
-CRITICAL: 
-1. Do not omit any ingredients or preparation steps found in the source. 
-2. Every ingredient listed in the "ingredients" section MUST be explicitly used or mentioned in at least one cooking step. 
+CRITICAL:
+1. Do not omit any ingredients or preparation steps found in the source.
+2. Every ingredient listed in the "ingredients" section MUST be explicitly used or mentioned in at least one cooking step.
 3. Preserve specific descriptors (e.g., "salted butter", "extra virgin olive oil") as they are important for the recipe's character.
 4. If a step involves adding an ingredient, name that ingredient clearly in the instruction.
 
@@ -280,13 +354,9 @@ Classify the recipe into one of these types:
 - prepStyle: 'make-ahead', 'fresh', or 'batch'
 - portions: number of portions the recipe yields
 
-Return the recipe matching the JSON schema.`;
-
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
+Recipe:
+${rawRecipeText}`,
     config: {
-      tools: [{ urlContext: {} }],
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -322,13 +392,20 @@ Return the recipe matching the JSON schema.`;
         required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
       }
     }
-  });
+  }, onProgress);
 
-  if (!response.text) {
-    throw new Error("Empty response from AI");
+  console.timeEnd('[import] Step 2: structure into JSON');
+  console.log('[import] Step 2 response length:', structureResponse.text?.length ?? 0, 'chars');
+
+  if (!structureResponse.text) {
+    throw new Error("Failed to structure the recipe. Please try again.");
   }
 
-  return JSON.parse(response.text);
+  const meal = JSON.parse(structureResponse.text);
+  if (extractedImageUrl) {
+    meal.imageUrl = extractedImageUrl;
+  }
+  return meal;
 }
 
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
