@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
 import { Meal, CategorizedGroceries } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2 } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, provider } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -27,6 +27,32 @@ const COMMON_INGREDIENTS = [
   { name: 'Bread', icon: '🍞' },
   { name: 'Beans', icon: '🫘' },
 ];
+
+function resizeImage(file: File, maxWidth = 600, quality = 0.6): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry' | 'favorites'>('plan');
@@ -109,6 +135,9 @@ export default function App() {
 
   const [importUrl, setImportUrl] = useState('');
   const [importingRecipe, setImportingRecipe] = useState(false);
+  const [imageUrlInputForMealId, setImageUrlInputForMealId] = useState<string | null>(null);
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const handleImportRecipe = async () => {
     if (!importUrl) return;
@@ -308,6 +337,40 @@ export default function App() {
         return [...prev, meal];
       }
     });
+  };
+
+  const handleImageSave = (meal: Meal, imageUrl: string) => {
+    const updatedMeal = { ...meal, imageUrl };
+    setFavorites(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
+    setMeals(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
+    setImageUrlInputForMealId(null);
+    setImageUrlInput('');
+  };
+
+  const handleImagePaste = async (meal: Meal, e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          try {
+            const dataUrl = await resizeImage(file);
+            handleImageSave(meal, dataUrl);
+          } catch (err) {
+            console.error('Failed to process pasted image:', err);
+            setError('Failed to process pasted image.');
+          }
+        }
+        return;
+      }
+    }
+  };
+
+  const handleImageRemove = (meal: Meal) => {
+    const updatedMeal = { ...meal, imageUrl: undefined };
+    setFavorites(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
+    setMeals(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
   };
 
   const handleSwapMeal = async (meal: Meal) => {
@@ -964,6 +1027,73 @@ export default function App() {
                 <div className="space-y-4">
                   {favorites.map(meal => (
                     <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
+                        {meal.imageUrl ? (
+                          <div className="relative -mx-6 -mt-6 mb-4">
+                            <img
+                              src={meal.imageUrl}
+                              alt={meal.title}
+                              className="w-full h-48 object-cover rounded-t-2xl cursor-pointer"
+                              onClick={() => setPreviewImageUrl(meal.imageUrl!)}
+                            />
+                            <div className="absolute top-2 right-2 flex gap-1">
+                              <button
+                                onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(meal.imageUrl || ''); }}
+                                className="p-2 bg-white/80 backdrop-blur-sm rounded-full hover:bg-white transition-colors shadow-sm"
+                              >
+                                <Camera size={16} className="text-stone-700" />
+                              </button>
+                              <button
+                                onClick={() => handleImageRemove(meal)}
+                                className="p-2 bg-white/80 backdrop-blur-sm rounded-full hover:bg-white transition-colors shadow-sm"
+                              >
+                                <Trash2 size={16} className="text-rose-500" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : imageUrlInputForMealId === meal.id ? null : (
+                          <div
+                            className="block -mx-6 -mt-6 mb-4 cursor-pointer"
+                            onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(''); }}
+                          >
+                            <div className="h-24 bg-stone-50 border-b border-dashed border-stone-200 rounded-t-2xl flex flex-col items-center justify-center gap-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors">
+                              <ImagePlus size={24} />
+                              <span className="text-xs font-medium">Add Photo</span>
+                            </div>
+                          </div>
+                        )}
+                        {imageUrlInputForMealId === meal.id && (
+                          <div className={`${meal.imageUrl ? '' : '-mx-6 -mt-6 mb-4 p-4 bg-stone-50 border-b border-stone-200 rounded-t-2xl'}`}>
+                            <p className="text-xs text-stone-400 mb-2">Paste an image or enter a URL</p>
+                            <div className={`flex gap-2 ${meal.imageUrl ? 'mb-3' : ''}`}>
+                              <input
+                                type="text"
+                                value={imageUrlInput}
+                                onChange={(e) => setImageUrlInput(e.target.value)}
+                                placeholder="Paste image or URL here..."
+                                className="flex-1 bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                autoFocus
+                                onPaste={(e) => handleImagePaste(meal, e)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && imageUrlInput.trim()) handleImageSave(meal, imageUrlInput.trim());
+                                  if (e.key === 'Escape') { setImageUrlInputForMealId(null); setImageUrlInput(''); }
+                                }}
+                              />
+                              <button
+                                onClick={() => handleImageSave(meal, imageUrlInput.trim())}
+                                disabled={!imageUrlInput.trim()}
+                                className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => { setImageUrlInputForMealId(null); setImageUrlInput(''); }}
+                                className="text-stone-400 hover:text-stone-600 px-2 py-2 transition-colors"
+                              >
+                                <X size={18} />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex gap-2 flex-wrap">
                             <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md text-stone-600 bg-stone-100">
@@ -1074,14 +1204,15 @@ export default function App() {
 
       <AnimatePresence>
         {selectedMealForPreview && (
-          <RecipeDetailModal 
-            meal={selectedMealForPreview} 
+          <RecipeDetailModal
+            meal={selectedMealForPreview}
             onClose={() => setSelectedMealForPreview(null)}
             onStartCooking={() => {
               setActiveCookingMeal(selectedMealForPreview);
               setSelectedMealForPreview(null);
             }}
             onEdit={() => setEditingMeal(selectedMealForPreview)}
+            onImageClick={(url) => setPreviewImageUrl(url)}
           />
         )}
         {editingMeal && (
@@ -1090,6 +1221,34 @@ export default function App() {
             onClose={() => setEditingMeal(null)}
             onSave={handleUpdateMeal}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {previewImageUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-stone-900/80 backdrop-blur-sm cursor-pointer"
+            onClick={() => setPreviewImageUrl(null)}
+          >
+            <motion.img
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              src={previewImageUrl}
+              alt="Recipe photo"
+              className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              onClick={() => setPreviewImageUrl(null)}
+              className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-sm rounded-full hover:bg-white/40 transition-colors"
+            >
+              <X size={24} className="text-white" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
@@ -1260,7 +1419,7 @@ function EditRecipeModal({ meal, onClose, onSave }: { meal: Meal, onClose: () =>
   );
 }
 
-function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit }: { meal: Meal, onClose: () => void, onStartCooking: () => void, onEdit: () => void }) {
+function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick }: { meal: Meal, onClose: () => void, onStartCooking: () => void, onEdit: () => void, onImageClick?: (url: string) => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
       <motion.div 
@@ -1292,6 +1451,16 @@ function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit }: { meal: Me
         </div>
         
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {meal.imageUrl && (
+            <div className="-mx-6 -mt-6 mb-2">
+              <img
+                src={meal.imageUrl}
+                alt={meal.title}
+                className="w-full h-56 object-cover cursor-pointer"
+                onClick={() => onImageClick?.(meal.imageUrl!)}
+              />
+            </div>
+          )}
           <section>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold flex items-center gap-2">
