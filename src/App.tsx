@@ -280,12 +280,6 @@ export default function App() {
     }
   }, [meals, groceries, pantryIngredients, favorites, user, isAuthReady]);
 
-  useEffect(() => {
-    if (isAuthReady && initialLoadDone.current && meals.length === 0) {
-      loadInitialPlan();
-    }
-  }, [isAuthReady, meals.length]);
-
   const loadInitialPlan = async () => {
     setLoadingMeals(true);
     setGroceries({}); // Reset groceries list when regenerating
