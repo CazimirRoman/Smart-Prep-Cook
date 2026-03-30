@@ -1,11 +1,24 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import { Meal, CategorizedGroceries } from "../types";
 
-// @ts-ignore
-const API_KEY = process.env.OPENAI_API_KEY || (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_OPENAI_API_KEY : "") || "";
-const client = new OpenAI({ apiKey: API_KEY, dangerouslyAllowBrowser: true });
-
 const MODEL = "gpt-5.3-chat-latest";
+
+async function callAI(
+  params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming
+): Promise<OpenAI.Chat.ChatCompletion> {
+  const res = await fetch('/api/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const error: any = new Error(err.error || `API request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
 
 async function generateWithRetry(
   args: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
@@ -14,7 +27,7 @@ async function generateWithRetry(
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await client.chat.completions.create(args);
+      return await callAI(args);
     } catch (e: any) {
       const status = e?.status;
       if ((status === 503 || status === 429) && attempt < maxRetries) {
@@ -139,13 +152,14 @@ Return EXACTLY ${totalNeeded} meals:
 ${batchDinnersNeeded > 0 ? `- ${batchDinnersNeeded} "Batch Dinners": Hearty, fridge-friendly meals (stews, curries, casseroles, hearty pastas) that yield 4-6 portions each and last for 2-3 days. Cook time can be 45-60 mins.\n` : ''}${makeAheadBreakfastsNeeded > 0 ? `- ${makeAheadBreakfastsNeeded} "Make-Ahead Breakfasts": Creative breakfasts prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.\n` : ''}${freshBreakfastsNeeded > 0 ? `- ${freshBreakfastsNeeded} "Fresh Breakfasts": Creative, interesting morning meals made fresh (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.\n` : ''}
 For EACH recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). NEVER use cups, ounces, pounds, tablespoons, teaspoons, or fractions like "1/2 teaspoon". Convert small amounts to grams or milliliters (e.g., "2g cinnamon", "5ml vanilla extract", "3g salt").
+Combine duplicate ingredients into a single entry with the total quantity (e.g., "83g flour" and "219g flour" must become "302g all-purpose flour").
+List ingredients in order of importance: main proteins/carbs first, then vegetables/dairy, then spices/seasonings last.
 ${previousTitles ? `DO NOT generate any of these previous meals: ${previousTitles}. ` : ''}Be creative and varied!`;
 
-  const response = await client.chat.completions.create({
+  const response = await callAI({
     model: MODEL,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.9,
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -200,9 +214,11 @@ Requirements:
   replacementPrompt += `
 For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.`;
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). NEVER use cups, ounces, pounds, tablespoons, teaspoons, or fractions like "1/2 teaspoon". Convert small amounts to grams or milliliters (e.g., "2g cinnamon", "5ml vanilla extract", "3g salt").
+Combine duplicate ingredients into a single entry with the total quantity (e.g., "83g flour" and "219g flour" must become "302g all-purpose flour").
+List ingredients in order of importance: main proteins/carbs first, then vegetables/dairy, then spices/seasonings last.`;
 
-  const response = await client.chat.completions.create({
+  const response = await callAI({
     model: MODEL,
     messages: [{ role: "user", content: replacementPrompt }],
     response_format: {
@@ -221,7 +237,7 @@ IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredie
 export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGroceries> {
   const allIngredients = meals.flatMap(m => (m.ingredients as any[]) || []).map((ing: any) => typeof ing === 'string' ? ing : ing.name).join("\\n");
 
-  const response = await client.chat.completions.create({
+  const response = await callAI({
     model: MODEL,
     messages: [{ role: "user", content: `Categorize the following ingredients into a standard grocery shopping list.\\n\\nIMPORTANT: You MUST combine and aggregate quantities for identical or similar ingredients. For example, if you see "200g chicken" and "300g chicken", combine them into "500g chicken". Similarly, if you see "2 eggs" and "3 eggs", combine them into "5 eggs". Do not output duplicate items. For each item, provide a fitting emoji icon.\\n\\nIngredients:\\n${allIngredients}` }],
     response_format: {
@@ -329,7 +345,9 @@ export async function importRecipeFromUrl(url: string, onProgress?: (msg: string
     model: MODEL,
     messages: [{ role: "user", content: `Convert the following recipe into the required JSON format.
 
-Convert ingredients to metric units (grams, kilograms, milliliters, liters) for weight/volume items (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.
+Convert ingredients to metric units (grams, kilograms, milliliters, liters) for weight/volume items (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). NEVER use cups, ounces, pounds, tablespoons, teaspoons, or fractions like "1/2 teaspoon". Convert small amounts to grams or milliliters (e.g., "2g cinnamon", "5ml vanilla extract", "3g salt").
+Combine duplicate ingredients into a single entry with the total quantity (e.g., "83g flour" and "219g flour" must become "302g all-purpose flour").
+List ingredients in order of importance: main proteins/carbs first, then vegetables/dairy, then spices/seasonings last.
 Provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.
 
 CRITICAL:
@@ -372,13 +390,15 @@ ${recipeText}` }],
 }
 
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
-  const response = await client.chat.completions.create({
+  const response = await callAI({
     model: MODEL,
     messages: [{ role: "user", content: `Suggest a dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available.
 
 For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.` }],
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). NEVER use cups, ounces, pounds, tablespoons, teaspoons, or fractions like "1/2 teaspoon". Convert small amounts to grams or milliliters (e.g., "2g cinnamon", "5ml vanilla extract", "3g salt").
+Combine duplicate ingredients into a single entry with the total quantity (e.g., "83g flour" and "219g flour" must become "302g all-purpose flour").
+List ingredients in order of importance: main proteins/carbs first, then vegetables/dairy, then spices/seasonings last. Adjust portion sizes for exactly 2 people.` }],
     response_format: {
       type: "json_schema",
       json_schema: {

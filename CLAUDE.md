@@ -23,7 +23,9 @@ No test framework is configured.
 ### Key Files
 
 - `src/App.tsx` — Monolithic component containing all UI: main `App` function plus `EditRecipeModal`, `RecipeDetailModal`, and `CookingModeView` components defined in the same file. All app state lives in `App()` via `useState` hooks.
-- `src/services/ai.ts` — OpenAI API integration (`openai`). Exports: `generateMealPlan`, `swapMeal`, `generateGroceryList`, `importRecipeFromUrl`, `generateRecipeFromIngredients`. All use structured JSON output schemas. Model: `gpt-5.3-chat-latest`.
+- `src/services/ai.ts` — AI service layer. Exports: `generateMealPlan`, `swapMeal`, `generateGroceryList`, `importRecipeFromUrl`, `generateRecipeFromIngredients`. All use structured JSON output schemas. Model: `gpt-5.3-chat-latest`. Calls server-side proxy at `/api/ai` (not OpenAI directly) to keep the API key secure.
+- `api/ai.ts` — Vercel serverless function that proxies OpenAI chat completion requests. Reads `OPENAI_API_KEY` from environment. Whitelists allowed models.
+- `api/fetch-url.ts` — Vercel serverless function that fetches external URLs server-side (for recipe imports, bypassing CORS).
 - `src/types.ts` — Core types: `Meal`, `CookingStep`, `Ingredient`, `CategorizedGroceries`.
 - `src/firebase.ts` — Firebase init, exports `auth`, `provider` (Google), `db` (Firestore).
 
@@ -33,14 +35,24 @@ Dual persistence strategy: localStorage for anonymous users, Firestore for authe
 
 ### Meal Plan Structure
 
-The app generates a fixed weekly plan: 2 batch dinners (4-6 portions each), 2 make-ahead breakfasts, and 2 fresh breakfasts. Favorites from previous plans are carried over. All recipes use metric units only.
+The app generates a fixed weekly plan: 2 batch dinners (4-6 portions each), 2 make-ahead breakfasts, and 2 fresh breakfasts. Favorites from previous plans are carried over. Recipes use metric units (grams, kg, ml, liters) for weight/volume items, and natural units for countable items (e.g., "3 eggs", "2 avocados", "4 slices of bread").
+
+### Deployment
+
+Deployed on **Vercel** via GitHub integration (push-to-deploy). Vercel auto-detects the `api/` directory and deploys serverless functions alongside the Vite SPA.
+
+- `vercel.json` — Configures function timeout (`maxDuration: 60` for `api/ai.ts` since OpenAI calls can take 15-30s).
 
 ## Configuration
 
-- `OPENAI_API_KEY` — Required. Set in `.env.local` (injected at build time via `vite.config.ts` `define` block as `process.env.OPENAI_API_KEY`)
+- `OPENAI_API_KEY` — Required. Set as environment variable on Vercel dashboard (Production + Development scopes). For local dev, set in `.env.local`. **Never exposed to the client bundle** — only accessed server-side by `api/ai.ts`.
 - `firebase-applet-config.json` — Firebase project config (checked into repo, used by AI Studio)
 - `firestore.rules` — Security rules enforcing per-user document ownership
 - Path alias: `@/` maps to project root (both in `tsconfig.json` and `vite.config.ts`)
+
+## Local Development
+
+Use `vercel dev` (not `npm run dev`) to run both the Vite frontend and the serverless functions locally. The API functions in `api/` load `.env.local` via dotenv for the OpenAI key.
 
 ## UI Conventions
 
