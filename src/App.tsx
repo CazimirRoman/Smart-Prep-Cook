@@ -210,6 +210,7 @@ export default function App() {
   };
 
   const [planTab, setPlanTab] = useState<'morning' | 'dinner'>('morning');
+  const [favTab, setFavTab] = useState<'morning' | 'dinner'>('morning');
 
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -652,20 +653,11 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  <div className="flex bg-stone-100 p-1 rounded-xl">
-                    <button
-                      onClick={() => setPlanTab('morning')}
-                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${planTab === 'morning' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
-                    >
-                      Morning Inspirations
-                    </button>
-                    <button
-                      onClick={() => setPlanTab('dinner')}
-                      className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${planTab === 'dinner' ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-700'}`}
-                    >
-                      Batch Dinners
-                    </button>
-                  </div>
+                  <SubTabToggle
+                    tabs={[{ key: 'morning' as const, label: 'Morning Inspirations' }, { key: 'dinner' as const, label: 'Batch Dinners' }]}
+                    activeTab={planTab}
+                    onTabChange={setPlanTab}
+                  />
 
                   {planTab === 'morning' && (
                     <section>
@@ -1078,9 +1070,15 @@ export default function App() {
                 )}
               </div>
 
-              {favorites.length > 0 ? (
+              <SubTabToggle
+                tabs={[{ key: 'morning' as const, label: 'Morning Inspirations' }, { key: 'dinner' as const, label: 'Batch Dinners' }]}
+                activeTab={favTab}
+                onTabChange={setFavTab}
+              />
+
+              {favorites.filter(m => favTab === 'morning' ? m.type === 'breakfast' : m.type === 'dinner').length > 0 ? (
                 <div className="space-y-4">
-                  {favorites.map(meal => (
+                  {favorites.filter(m => favTab === 'morning' ? m.type === 'breakfast' : m.type === 'dinner').map(meal => (
                     <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                         {meal.imageUrl ? (
                           <div className="relative -mx-6 -mt-6 mb-4">
@@ -1266,20 +1264,20 @@ export default function App() {
                           </a>
                         )}
                         <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
-                        
+
                         <div className="flex items-center justify-between mt-4 pt-4 border-t border-stone-100">
                           <div className="flex items-center gap-4 text-sm text-stone-500">
                             <span className="flex items-center gap-1"><Clock size={16} /> {meal.prepTime + meal.cookTime} min total</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <button 
+                            <button
                               onClick={() => handleViewMealGroceries(meal)}
                               className="bg-stone-100 text-stone-700 p-2 rounded-xl hover:bg-stone-200 transition-colors"
                               title="Grocery List for this meal"
                             >
                               <ShoppingCart size={16} />
                             </button>
-                            <button 
+                            <button
                               onClick={() => setSelectedMealForPreview(meal)}
                               className="bg-stone-900 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors"
                             >
@@ -1293,7 +1291,11 @@ export default function App() {
                 </div>
               ) : (
                 <div className="text-center py-10">
-                  <p className="text-stone-400">You haven't saved any favorites yet. Click the heart icon on any recipe to save it here!</p>
+                  <p className="text-stone-400">
+                    {favTab === 'morning'
+                      ? "No breakfast favorites yet. Heart a breakfast recipe to save it here!"
+                      : "No dinner favorites yet. Heart a dinner recipe to save it here!"}
+                  </p>
                 </div>
               )}
             </motion.div>
@@ -1390,6 +1392,28 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function SubTabToggle<T extends string>({ tabs, activeTab, onTabChange }: {
+  tabs: { key: T; label: string }[];
+  activeTab: T;
+  onTabChange: (tab: T) => void;
+}) {
+  return (
+    <div className="flex bg-stone-100 p-1 rounded-xl">
+      {tabs.map(tab => (
+        <button
+          key={tab.key}
+          onClick={() => onTabChange(tab.key)}
+          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+            activeTab === tab.key ? 'bg-white text-emerald-700 shadow-sm' : 'text-stone-500 hover:text-stone-700'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
     </div>
   );
 }
