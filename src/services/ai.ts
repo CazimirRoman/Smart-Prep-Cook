@@ -1,22 +1,22 @@
-import { GoogleGenAI, Type, UrlRetrievalStatus } from "@google/genai";
+import OpenAI from "openai";
 import { Meal, CategorizedGroceries } from "../types";
 
 // @ts-ignore
-const API_KEY = process.env.GEMINI_API_KEY || (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GEMINI_API_KEY : "") || "";
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const API_KEY = process.env.OPENAI_API_KEY || (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_OPENAI_API_KEY : "") || "";
+const client = new OpenAI({ apiKey: API_KEY, dangerouslyAllowBrowser: true });
 
-const MODEL = "gemini-3-flash-preview";
+const MODEL = "gpt-5.3-chat-latest";
 
 async function generateWithRetry(
-  args: Parameters<typeof ai.models.generateContent>[0],
+  args: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
   onProgress?: (msg: string) => void,
-) {
+): Promise<OpenAI.Chat.ChatCompletion> {
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await ai.models.generateContent(args);
+      return await client.chat.completions.create(args);
     } catch (e: any) {
-      const status = e?.status ?? e?.error?.code;
+      const status = e?.status;
       if ((status === 503 || status === 429) && attempt < maxRetries) {
         const delay = (attempt + 1) * 3000;
         console.warn(`[AI] Retrying after ${status} (attempt ${attempt + 1}/${maxRetries})...`);
@@ -31,39 +31,79 @@ async function generateWithRetry(
 }
 
 const stepsSchema = {
-  type: Type.ARRAY,
+  type: "array" as const,
   items: {
-    type: Type.OBJECT,
+    type: "object" as const,
     properties: {
-      id: { type: Type.STRING },
-      instruction: { type: Type.STRING, description: "The main action to take." },
-      durationMinutes: { type: Type.NUMBER, description: "Duration of this step in minutes, if it involves waiting/cooking." },
+      id: { type: "string" as const },
+      instruction: { type: "string" as const, description: "The main action to take." },
+      durationMinutes: {
+        type: ["number", "null"] as const,
+        description: "Duration of this step in minutes, if it involves waiting/cooking."
+      },
       parallelTasks: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
+        type: ["array", "null"] as const,
+        items: { type: "string" as const },
         description: "Tasks to perform while this step's duration is elapsing."
       }
     },
-    required: ["id", "instruction"]
+    required: ["id", "instruction", "durationMinutes", "parallelTasks"] as const,
+    additionalProperties: false as const,
   }
+};
+
+const ingredientSchema = {
+  type: "object" as const,
+  properties: {
+    name: { type: "string" as const, description: "Ingredient name with quantity" },
+    category: { type: "string" as const, description: "Produce, Meat, Dairy, Pantry, etc." },
+    icon: { type: "string" as const, description: "A single emoji representing the ingredient" }
+  },
+  required: ["name", "category", "icon"] as const,
+  additionalProperties: false as const,
+};
+
+const mealSchema = {
+  type: "object" as const,
+  properties: {
+    id: { type: "string" as const },
+    type: { type: "string" as const, description: "'breakfast' or 'dinner'" },
+    prepStyle: { type: "string" as const, description: "'make-ahead', 'fresh', or 'batch'" },
+    portions: { type: "number" as const, description: "Number of portions the recipe yields" },
+    title: { type: "string" as const },
+    description: { type: "string" as const },
+    prepTime: { type: "number" as const, description: "Time in minutes" },
+    cookTime: { type: "number" as const, description: "Time in minutes" },
+    ingredients: {
+      type: "array" as const,
+      items: ingredientSchema,
+      description: "List of ingredients with quantities, categories, and icons"
+    },
+    miseEnPlace: {
+      type: "array" as const,
+      items: { type: "string" as const },
+      description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
+    },
+    steps: stepsSchema,
+  },
+  required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"] as const,
+  additionalProperties: false as const,
 };
 
 export async function generateMealPlan(favorites: Meal[] = [], currentMeals: Meal[] = []): Promise<Meal[]> {
   // Find which current meals are favorited
   let keptMeals = currentMeals.filter(m => favorites.some(f => f.title === m.title));
-  
+
   // If we have no kept meals from the current plan, but we have favorites, randomly pick up to 2
   if (keptMeals.length === 0 && favorites.length > 0) {
     const shuffledFavs = [...favorites].sort(() => 0.5 - Math.random());
-    // Try to pick up to 2 favorites that fit the criteria
     let added = 0;
     for (const fav of shuffledFavs) {
       if (added >= 2) break;
-      // Make sure we don't exceed the required amounts
       const batchDinners = keptMeals.filter(m => m.type === 'dinner' && m.prepStyle === 'batch').length;
       const makeAheadBreakfasts = keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'make-ahead').length;
       const freshBreakfasts = keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'fresh').length;
-      
+
       if (fav.type === 'dinner' && fav.prepStyle === 'batch' && batchDinners < 2) {
         keptMeals.push(fav);
         added++;
@@ -76,19 +116,18 @@ export async function generateMealPlan(favorites: Meal[] = [], currentMeals: Mea
       }
     }
   }
-  
+
   // Count how many of each type we already have
   let batchDinnersNeeded = 2 - keptMeals.filter(m => m.type === 'dinner' && m.prepStyle === 'batch').length;
   let makeAheadBreakfastsNeeded = 2 - keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'make-ahead').length;
   let freshBreakfastsNeeded = 2 - keptMeals.filter(m => m.type === 'breakfast' && m.prepStyle === 'fresh').length;
-  
-  // Ensure we don't ask for negative amounts
+
   batchDinnersNeeded = Math.max(0, batchDinnersNeeded);
   makeAheadBreakfastsNeeded = Math.max(0, makeAheadBreakfastsNeeded);
   freshBreakfastsNeeded = Math.max(0, freshBreakfastsNeeded);
-  
+
   const totalNeeded = batchDinnersNeeded + makeAheadBreakfastsNeeded + freshBreakfastsNeeded;
-  
+
   if (totalNeeded === 0) {
     return keptMeals;
   }
@@ -100,70 +139,44 @@ Return EXACTLY ${totalNeeded} meals:
 ${batchDinnersNeeded > 0 ? `- ${batchDinnersNeeded} "Batch Dinners": Hearty, fridge-friendly meals (stews, curries, casseroles, hearty pastas) that yield 4-6 portions each and last for 2-3 days. Cook time can be 45-60 mins.\n` : ''}${makeAheadBreakfastsNeeded > 0 ? `- ${makeAheadBreakfastsNeeded} "Make-Ahead Breakfasts": Creative breakfasts prepared the night before (e.g., overnight oats with a twist, chia puddings, baked egg cups). Yield 2 portions.\n` : ''}${freshBreakfastsNeeded > 0 ? `- ${freshBreakfastsNeeded} "Fresh Breakfasts": Creative, interesting morning meals made fresh (e.g., savory scallion pancakes, Turkish eggs, unique omelets - NO classic plain pancakes). Yield 2 portions.\n` : ''}
 For EACH recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.
 ${previousTitles ? `DO NOT generate any of these previous meals: ${previousTitles}. ` : ''}Be creative and varied!`;
 
-  const response = await ai.models.generateContent({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    contents: prompt,
-    config: {
-      temperature: 0.9,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          meals: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                type: { type: Type.STRING, description: "'breakfast' or 'dinner'" },
-                prepStyle: { type: Type.STRING, description: "'make-ahead', 'fresh', or 'batch'" },
-                portions: { type: Type.NUMBER, description: "Number of portions the recipe yields" },
-                title: { type: Type.STRING },
-                description: { type: Type.STRING },
-                prepTime: { type: Type.NUMBER, description: "Time in minutes" },
-                cookTime: { type: Type.NUMBER, description: "Time in minutes" },
-                ingredients: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING, description: "Ingredient name with quantity" },
-                      category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
-                      icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
-                    },
-                    required: ["name", "category", "icon"]
-                  },
-                  description: "List of ingredients with quantities, categories, and icons"
-                },
-                miseEnPlace: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
-                },
-                steps: stepsSchema
-              },
-              required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.9,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "meal_plan",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            meals: {
+              type: "array",
+              items: mealSchema,
             }
-          }
-        },
-        required: ["meals"]
+          },
+          required: ["meals"],
+          additionalProperties: false,
+        }
       }
     }
   });
 
-  if (!response.text) {
+  const text = response.choices[0].message.content;
+  if (!text) {
     console.error("Empty response from AI", response);
     throw new Error("The AI returned an empty response. Please try again.");
   }
 
   try {
-    const parsed = JSON.parse(response.text);
+    const parsed = JSON.parse(text);
     return [...keptMeals, ...(parsed.meals || [])];
   } catch (e) {
-    console.error("Failed to parse AI response:", response.text);
+    console.error("Failed to parse AI response:", text);
     throw new Error("The AI returned an invalid response format. Please try again.");
   }
 }
@@ -187,160 +200,136 @@ Requirements:
   replacementPrompt += `
 For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use ONLY metric units (grams, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, or spoons.`;
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.`;
 
-  const response = await ai.models.generateContent({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    contents: replacementPrompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING },
-          prepStyle: { type: Type.STRING },
-          portions: { type: Type.NUMBER },
-          title: { type: Type.STRING },
-          description: { type: Type.STRING },
-          prepTime: { type: Type.NUMBER },
-          cookTime: { type: Type.NUMBER },
-          ingredients: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: "Ingredient name with quantity" },
-                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
-                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
-              },
-              required: ["name", "category", "icon"]
-            }
-          },
-          miseEnPlace: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
-          },
-          steps: stepsSchema
-        },
-        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
+    messages: [{ role: "user", content: replacementPrompt }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "swap_meal",
+        strict: true,
+        schema: mealSchema,
       }
     }
   });
 
-  return JSON.parse(response.text || "{}");
+  return JSON.parse(response.choices[0].message.content || "{}");
 }
 
 export async function generateGroceryList(meals: Meal[]): Promise<CategorizedGroceries> {
   const allIngredients = meals.flatMap(m => (m.ingredients as any[]) || []).map((ing: any) => typeof ing === 'string' ? ing : ing.name).join("\\n");
-  
-  const response = await ai.models.generateContent({
+
+  const response = await client.chat.completions.create({
     model: MODEL,
-    contents: `Categorize the following ingredients into a standard grocery shopping list.\\n\\nIMPORTANT: You MUST combine and aggregate quantities for identical or similar ingredients. For example, if you see "200g chicken" and "300g chicken", combine them into a single entry "500g chicken". Do not output duplicate items. For each item, provide a fitting emoji icon.\\n\\nIngredients:\\n${allIngredients}`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          categories: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                category: { type: Type.STRING, description: "e.g., Produce, Meat, Dairy, Pantry" },
-                items: { 
-                  type: Type.ARRAY, 
-                  items: { 
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      icon: { type: Type.STRING, description: "A single emoji representing the item" }
-                    },
-                    required: ["name", "icon"]
-                  } 
-                }
-              },
-              required: ["category", "items"]
+    messages: [{ role: "user", content: `Categorize the following ingredients into a standard grocery shopping list.\\n\\nIMPORTANT: You MUST combine and aggregate quantities for identical or similar ingredients. For example, if you see "200g chicken" and "300g chicken", combine them into "500g chicken". Similarly, if you see "2 eggs" and "3 eggs", combine them into "5 eggs". Do not output duplicate items. For each item, provide a fitting emoji icon.\\n\\nIngredients:\\n${allIngredients}` }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "grocery_list",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            categories: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  category: { type: "string", description: "e.g., Produce, Meat, Dairy, Pantry" },
+                  items: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        icon: { type: "string", description: "A single emoji representing the item" }
+                      },
+                      required: ["name", "icon"],
+                      additionalProperties: false,
+                    }
+                  }
+                },
+                required: ["category", "items"],
+                additionalProperties: false,
+              }
             }
-          }
-        },
-        required: ["categories"]
+          },
+          required: ["categories"],
+          additionalProperties: false,
+        }
       }
     }
   });
 
-  if (!response.text) {
+  const text = response.choices[0].message.content;
+  if (!text) {
     throw new Error("Empty response from AI");
   }
 
-  const parsed = JSON.parse(response.text);
+  const parsed = JSON.parse(text);
   const rawCategories: { category: string, items: { name: string, icon: string }[] }[] = parsed.categories || [];
-  
-  // Convert to our UI format
+
   const categorized: CategorizedGroceries = {};
   for (const cat of rawCategories) {
     categorized[cat.category] = cat.items.map(i => ({ item: i.name, icon: i.icon, checked: false }));
   }
-  
+
   return categorized;
 }
 
 export async function importRecipeFromUrl(url: string, onProgress?: (msg: string) => void): Promise<Meal> {
-  // Step 1: Fetch URL content via urlContext (no structured output — they conflict)
+  // Step 1: Fetch URL content via server proxy
   onProgress?.("Fetching recipe from URL...");
-  console.time('[import] Step 1: urlContext fetch');
-  const fetchResponse = await generateWithRetry({
-    model: MODEL,
-    contents: `Visit this URL and extract ONLY the recipe data: ${url}
+  console.time('[import] Step 1: fetch URL');
 
-Be concise. Return:
-- Title
-- Ingredients (name + quantity, one per line)
-- Steps (numbered, brief)
-- IMAGE_URL: <the main recipe photo URL from og:image, JSON-LD, or hero image>`,
-    config: {
-      tools: [{ urlContext: {} }]
-    }
-  }, onProgress);
+  const proxyResponse = await fetch(`/api/fetch-url?url=${encodeURIComponent(url)}`);
+  const proxyData = await proxyResponse.json();
 
-  console.timeEnd('[import] Step 1: urlContext fetch');
-  console.log('[import] URL metadata:', JSON.stringify(fetchResponse.candidates?.[0]?.urlContextMetadata, null, 2));
-  console.log('[import] Step 1 response length:', fetchResponse.text?.length ?? 0, 'chars');
+  console.timeEnd('[import] Step 1: fetch URL');
 
-  // Validate the URL was actually fetched
-  const urlMetadata = fetchResponse.candidates?.[0]?.urlContextMetadata?.urlMetadata;
-  if (urlMetadata) {
-    const failed = urlMetadata.find(m => m.urlRetrievalStatus !== UrlRetrievalStatus.URL_RETRIEVAL_STATUS_SUCCESS);
-    if (failed) {
-      const status = failed.urlRetrievalStatus;
-      if (status === UrlRetrievalStatus.URL_RETRIEVAL_STATUS_PAYWALL) {
-        throw new Error("Could not import recipe: the page is behind a paywall.");
-      } else if (status === UrlRetrievalStatus.URL_RETRIEVAL_STATUS_UNSAFE) {
-        throw new Error("Could not import recipe: the URL was flagged as unsafe.");
-      } else {
-        throw new Error("Could not fetch the recipe URL. Please check the link and try again.");
-      }
-    }
+  if (!proxyResponse.ok || proxyData.error) {
+    throw new Error(`Could not fetch the recipe URL: ${proxyData.error || 'Unknown error'}. Please check the link and try again.`);
   }
 
-  const rawRecipeText = fetchResponse.text;
-  if (!rawRecipeText) {
+  if (proxyData.status && proxyData.status >= 400) {
+    if (proxyData.status === 403 || proxyData.status === 401) {
+      throw new Error("Could not import recipe: the page is behind a paywall or requires authentication.");
+    }
+    throw new Error("Could not fetch the recipe URL. Please check the link and try again.");
+  }
+
+  const html: string = proxyData.html;
+  if (!html || html.length < 100) {
     throw new Error("Could not extract recipe content from the URL. Please check the link and try again.");
   }
 
-  // Extract image URL if the model found one
-  const imageMatch = rawRecipeText.match(/IMAGE_URL:\s*(https?:\/\/[^\s]+)/);
-  const extractedImageUrl = imageMatch?.[1] || undefined;
+  // Extract og:image from HTML
+  const ogImageMatch = html.match(/<meta\s+(?:property|name)=["']og:image["']\s+content=["']([^"']+)["']/i)
+    || html.match(/<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["']og:image["']/i);
+  const extractedImageUrl = ogImageMatch?.[1] || undefined;
+
+  // Strip HTML to plain text
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, nav, header, footer').forEach(el => el.remove());
+  const rawText = doc.body?.textContent || '';
+  const recipeText = rawText.replace(/\s+/g, ' ').trim().slice(0, 15000);
+
+  if (recipeText.length < 50) {
+    throw new Error("Could not extract recipe content from the URL. The page may be dynamically loaded. Please try a different link.");
+  }
 
   // Step 2: Structure the extracted text into the Meal JSON schema
   onProgress?.("Recipe found! Converting to metric and optimizing steps...");
   console.time('[import] Step 2: structure into JSON');
+
   const structureResponse = await generateWithRetry({
     model: MODEL,
-    contents: `Convert the following recipe into the required JSON format.
+    messages: [{ role: "user", content: `Convert the following recipe into the required JSON format.
 
-Convert all ingredients to metric units (grams, milliliters). DO NOT use cups, ounces, pounds, or spoons.
+Convert ingredients to metric units (grams, kilograms, milliliters, liters) for weight/volume items (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons.
 Provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.
 
 CRITICAL:
@@ -355,53 +344,27 @@ Classify the recipe into one of these types:
 - portions: number of portions the recipe yields
 
 Recipe:
-${rawRecipeText}`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING, description: "'breakfast' or 'dinner'" },
-          prepStyle: { type: Type.STRING, description: "'make-ahead', 'fresh', or 'batch'" },
-          portions: { type: Type.NUMBER, description: "Number of portions the recipe yields" },
-          title: { type: Type.STRING },
-          description: { type: Type.STRING },
-          prepTime: { type: Type.NUMBER, description: "Time in minutes" },
-          cookTime: { type: Type.NUMBER, description: "Time in minutes" },
-          ingredients: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: "Ingredient name with quantity" },
-                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
-                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
-              },
-              required: ["name", "category", "icon"]
-            },
-            description: "List of ingredients with quantities, categories, and icons"
-          },
-          miseEnPlace: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
-          },
-          steps: stepsSchema
-        },
-        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
+${recipeText}` }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "import_recipe",
+        strict: true,
+        schema: mealSchema,
       }
     }
   }, onProgress);
 
   console.timeEnd('[import] Step 2: structure into JSON');
-  console.log('[import] Step 2 response length:', structureResponse.text?.length ?? 0, 'chars');
 
-  if (!structureResponse.text) {
+  const text = structureResponse.choices[0].message.content;
+  if (!text) {
     throw new Error("Failed to structure the recipe. Please try again.");
   }
 
-  const meal = JSON.parse(structureResponse.text);
+  console.log('[import] Step 2 response length:', text.length, 'chars');
+
+  const meal = JSON.parse(text);
   if (extractedImageUrl) {
     meal.imageUrl = extractedImageUrl;
   }
@@ -409,49 +372,22 @@ ${rawRecipeText}`,
 }
 
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
-  const response = await ai.models.generateContent({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    contents: `Suggest a dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available. 
-    
+    messages: [{ role: "user", content: `Suggest a dinner recipe for 2 people that uses some or all of the following ingredients: ${ingredients.join(', ')}. You can assume basic pantry staples (salt, pepper, oil, etc.) are available.
+
 For this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish (e.g., chopping veggies, setting the table).
 
-IMPORTANT: Use ONLY metric units (grams, kilograms, liters, milliliters) for all ingredients. DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          id: { type: Type.STRING },
-          type: { type: Type.STRING },
-          prepStyle: { type: Type.STRING },
-          portions: { type: Type.NUMBER },
-          title: { type: Type.STRING },
-          description: { type: Type.STRING },
-          prepTime: { type: Type.NUMBER },
-          cookTime: { type: Type.NUMBER },
-          ingredients: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: "Ingredient name with quantity" },
-                category: { type: Type.STRING, description: "Produce, Meat, Dairy, Pantry, etc." },
-                icon: { type: Type.STRING, description: "A single emoji representing the ingredient" }
-              },
-              required: ["name", "category", "icon"]
-            }
-          },
-          miseEnPlace: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Mise en place steps: what to wash, chop, measure, or prepare before starting to cook."
-          },
-          steps: stepsSchema
-        },
-        required: ["id", "type", "prepStyle", "portions", "title", "description", "prepTime", "cookTime", "ingredients", "miseEnPlace", "steps"]
+IMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). DO NOT use cups, ounces, pounds, tablespoons, or teaspoons. Adjust portion sizes for exactly 2 people.` }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "pantry_recipe",
+        strict: true,
+        schema: mealSchema,
       }
     }
   });
 
-  return JSON.parse(response.text || "{}");
+  return JSON.parse(response.choices[0].message.content || "{}");
 }

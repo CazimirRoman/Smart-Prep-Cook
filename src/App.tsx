@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
-import { Meal, CategorizedGroceries } from './types';
+import { Meal, Ingredient, CategorizedGroceries } from './types';
 import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus, ExternalLink, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, provider } from './firebase';
@@ -27,6 +27,21 @@ const COMMON_INGREDIENTS = [
   { name: 'Bread', icon: '🍞' },
   { name: 'Beans', icon: '🫘' },
 ];
+
+const SPICE_CATEGORIES = ['Spices & Seasonings', 'Spices', 'Seasonings'];
+
+function partitionIngredients(ingredients: (Ingredient | string)[]) {
+  const main: (Ingredient | string)[] = [];
+  const spices: (Ingredient | string)[] = [];
+  for (const ing of ingredients) {
+    if (typeof ing !== 'string' && SPICE_CATEGORIES.includes(ing.category)) {
+      spices.push(ing);
+    } else {
+      main.push(ing);
+    }
+  }
+  return { main, spices };
+}
 
 function resizeImage(file: File, maxWidth = 600, quality = 0.6): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1605,14 +1620,34 @@ function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick
                 {meal.portions} Portions
               </span>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {meal.ingredients.map((ing, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
-                  <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
-                  <span className="text-stone-700 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
-                </div>
-              ))}
-            </div>
+            {(() => {
+              const { main, spices } = partitionIngredients(meal.ingredients);
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {main.map((ing, idx) => (
+                      <div key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
+                        <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
+                        <span className="text-stone-700 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {spices.length > 0 && (
+                    <div className="mt-4 bg-amber-50/60 rounded-xl border border-amber-100 p-4">
+                      <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wider mb-2">Spices & Seasonings</p>
+                      <div className="flex flex-wrap gap-2">
+                        {spices.map((ing, idx) => (
+                          <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/80 rounded-lg border border-amber-100 text-sm text-stone-600">
+                            <span>{typeof ing === 'string' ? '🧂' : ing.icon}</span>
+                            {typeof ing === 'string' ? ing : ing.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </section>
 
           <section>
@@ -1822,14 +1857,34 @@ function CookingModeView({ meal, onClose, onFinish }: { meal: Meal, onClose: () 
                     <ShoppingCart size={18} />
                     Ingredients to gather:
                   </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {meal.ingredients.map((ing, idx) => (
-                      <div key={idx} className="flex items-center gap-3 p-3 bg-stone-800/50 rounded-xl border border-stone-700">
-                        <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
-                        <span className="text-stone-300 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {(() => {
+                    const { main, spices } = partitionIngredients(meal.ingredients);
+                    return (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {main.map((ing, idx) => (
+                            <div key={idx} className="flex items-center gap-3 p-3 bg-stone-800/50 rounded-xl border border-stone-700">
+                              <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
+                              <span className="text-stone-300 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {spices.length > 0 && (
+                          <div className="mt-4 bg-amber-900/20 rounded-xl border border-amber-800/30 p-4">
+                            <p className="text-xs font-bold text-amber-400/70 uppercase tracking-wider mb-2">Spices & Seasonings</p>
+                            <div className="flex flex-wrap gap-2">
+                              {spices.map((ing, idx) => (
+                                <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-800/60 rounded-lg border border-amber-800/30 text-sm text-stone-400">
+                                  <span>{typeof ing === 'string' ? '🧂' : ing.icon}</span>
+                                  {typeof ing === 'string' ? ing : ing.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 
