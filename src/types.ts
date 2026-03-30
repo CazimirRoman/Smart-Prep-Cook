@@ -25,6 +25,7 @@ export interface Meal {
   steps: CookingStep[];
   lastCookedAt?: string;
   imageUrl?: string;
+  sourceUrl?: string;
 }
 
 export interface CategorizedGroceries {

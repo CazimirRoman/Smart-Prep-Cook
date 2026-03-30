@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
 import { Meal, CategorizedGroceries } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus, ExternalLink, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, provider } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -138,6 +138,9 @@ export default function App() {
   const [imageUrlInputForMealId, setImageUrlInputForMealId] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [replaceUrlInputForMealId, setReplaceUrlInputForMealId] = useState<string | null>(null);
+  const [replaceUrlInput, setReplaceUrlInput] = useState('');
+  const [replacingRecipeMealId, setReplacingRecipeMealId] = useState<string | null>(null);
 
   const handleImportRecipe = async () => {
     if (!importUrl) return;
@@ -145,6 +148,7 @@ export default function App() {
     setError(null);
     try {
       const meal = await importRecipeFromUrl(importUrl);
+      meal.sourceUrl = importUrl;
       setFavorites(prev => {
         if (!prev.some(f => f.title === meal.title)) {
           return [...prev, meal];
@@ -157,6 +161,31 @@ export default function App() {
       setError(e.message || "Failed to import recipe from URL.");
     } finally {
       setImportingRecipe(false);
+    }
+  };
+
+  const handleReplaceWithUrl = async (meal: Meal) => {
+    if (!replaceUrlInput.trim()) return;
+    setReplacingRecipeMealId(meal.id);
+    setError(null);
+    try {
+      const imported = await importRecipeFromUrl(replaceUrlInput.trim());
+      const updatedMeal: Meal = {
+        ...imported,
+        id: meal.id,
+        imageUrl: meal.imageUrl || imported.imageUrl,
+        lastCookedAt: meal.lastCookedAt,
+        sourceUrl: replaceUrlInput.trim(),
+      };
+      setFavorites(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
+      setMeals(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
+      setReplaceUrlInputForMealId(null);
+      setReplaceUrlInput('');
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Failed to import recipe from URL.");
+    } finally {
+      setReplacingRecipeMealId(null);
     }
   };
 
@@ -1037,7 +1066,7 @@ export default function App() {
                             />
                             <div className="absolute top-2 right-2 flex gap-1">
                               <button
-                                onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(meal.imageUrl || ''); }}
+                                onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(meal.imageUrl || ''); setReplaceUrlInputForMealId(null); setReplaceUrlInput(''); }}
                                 className="p-2 bg-white/80 backdrop-blur-sm rounded-full hover:bg-white transition-colors shadow-sm"
                               >
                                 <Camera size={16} className="text-stone-700" />
@@ -1053,7 +1082,7 @@ export default function App() {
                         ) : imageUrlInputForMealId === meal.id ? null : (
                           <div
                             className="block -mx-6 -mt-6 mb-4 cursor-pointer"
-                            onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(''); }}
+                            onClick={() => { setImageUrlInputForMealId(meal.id); setImageUrlInput(''); setReplaceUrlInputForMealId(null); setReplaceUrlInput(''); }}
                           >
                             <div className="h-24 bg-stone-50 border-b border-dashed border-stone-200 rounded-t-2xl flex flex-col items-center justify-center gap-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors">
                               <ImagePlus size={24} />
@@ -1104,14 +1133,39 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex gap-2">
-                            <button 
+                            <button
+                              onClick={() => {
+                                if (replaceUrlInputForMealId === meal.id) {
+                                  setReplaceUrlInputForMealId(null);
+                                  setReplaceUrlInput('');
+                                } else {
+                                  setReplaceUrlInputForMealId(meal.id);
+                                  setReplaceUrlInput('');
+                                  setImageUrlInputForMealId(null);
+                                  setImageUrlInput('');
+                                }
+                              }}
+                              className={`p-1.5 rounded-full transition-colors ${
+                                replaceUrlInputForMealId === meal.id
+                                  ? 'text-emerald-600 bg-emerald-50'
+                                  : 'text-stone-400 hover:text-stone-700 hover:bg-stone-100'
+                              }`}
+                              title="Replace with recipe from URL"
+                              disabled={replacingRecipeMealId === meal.id}
+                            >
+                              {replacingRecipeMealId === meal.id
+                                ? <RefreshCw size={18} className="animate-spin" />
+                                : <Globe size={18} />
+                              }
+                            </button>
+                            <button
                               onClick={() => setEditingMeal(meal)}
                               className="text-stone-400 hover:text-stone-700 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
                               title="Edit this recipe"
                             >
                               <Pencil size={18} />
                             </button>
-                            <button 
+                            <button
                               onClick={() => toggleFavorite(meal)}
                               className="p-1.5 rounded-full transition-colors text-rose-500 hover:bg-rose-50"
                               title="Remove from favorites"
@@ -1120,11 +1174,64 @@ export default function App() {
                             </button>
                           </div>
                         </div>
+                        {replaceUrlInputForMealId === meal.id && (
+                          <div className="mb-3 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                            <p className="text-xs text-stone-400 mb-2">Paste a recipe URL to replace this recipe's data</p>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                value={replaceUrlInput}
+                                onChange={(e) => setReplaceUrlInput(e.target.value)}
+                                placeholder="https://example.com/recipe"
+                                className="flex-1 bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                autoFocus
+                                disabled={replacingRecipeMealId === meal.id}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && replaceUrlInput.trim() && replacingRecipeMealId !== meal.id) {
+                                    handleReplaceWithUrl(meal);
+                                  }
+                                  if (e.key === 'Escape') {
+                                    setReplaceUrlInputForMealId(null);
+                                    setReplaceUrlInput('');
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => handleReplaceWithUrl(meal)}
+                                disabled={!replaceUrlInput.trim() || replacingRecipeMealId === meal.id}
+                                className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                              >
+                                {replacingRecipeMealId === meal.id
+                                  ? <><RefreshCw size={14} className="animate-spin" /> Importing...</>
+                                  : 'Replace'
+                                }
+                              </button>
+                              <button
+                                onClick={() => { setReplaceUrlInputForMealId(null); setReplaceUrlInput(''); }}
+                                className="text-stone-400 hover:text-stone-600 px-2 py-2 transition-colors"
+                                disabled={replacingRecipeMealId === meal.id}
+                              >
+                                <X size={18} />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         <h3 className="text-xl font-semibold mb-1">{meal.title}</h3>
                         {meal.lastCookedAt && (
                           <p className="text-xs text-emerald-600 font-medium mb-1">
                             Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
                           </p>
+                        )}
+                        {meal.sourceUrl && (
+                          <a
+                            href={meal.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-stone-400 hover:text-emerald-600 transition-colors mb-1"
+                          >
+                            <ExternalLink size={12} />
+                            {new URL(meal.sourceUrl).hostname.replace('www.', '')}
+                          </a>
                         )}
                         <p className="text-stone-500 text-sm mb-4 line-clamp-2">{meal.description}</p>
                         
@@ -1437,12 +1544,22 @@ function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick
                   Last cooked: {new Date(meal.lastCookedAt).toLocaleDateString()}
                 </p>
               )}
-              <button 
+              <button
                 onClick={onEdit}
                 className="text-stone-400 hover:text-stone-700 flex items-center gap-1 text-sm font-medium transition-colors"
               >
                 <Pencil size={14} /> Edit Recipe
               </button>
+              {meal.sourceUrl && (
+                <a
+                  href={meal.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-stone-400 hover:text-emerald-600 flex items-center gap-1 text-sm font-medium transition-colors"
+                >
+                  <ExternalLink size={14} /> Original Recipe
+                </a>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
