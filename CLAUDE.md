@@ -23,7 +23,7 @@ No test framework is configured.
 ### Key Files
 
 - `src/App.tsx` — Monolithic component containing all UI: main `App` function plus `EditRecipeModal`, `RecipeDetailModal`, and `CookingModeView` components defined in the same file. All app state lives in `App()` via `useState` hooks.
-- `src/services/ai.ts` — Gemini API integration (`@google/genai`). Exports: `generateMealPlan`, `swapMeal`, `generateGroceryList`, `importRecipeFromUrl`, `generateRecipeFromIngredients`. All use structured JSON output schemas. Model: `gemini-3-flash-preview`.
+- `src/services/ai.ts` — OpenAI API integration (`openai`). Exports: `generateMealPlan`, `swapMeal`, `generateGroceryList`, `importRecipeFromUrl`, `generateRecipeFromIngredients`. All use structured JSON output schemas. Model: `gpt-5.3-chat-latest`.
 - `src/types.ts` — Core types: `Meal`, `CookingStep`, `Ingredient`, `CategorizedGroceries`.
 - `src/firebase.ts` — Firebase init, exports `auth`, `provider` (Google), `db` (Firestore).
 
@@ -37,7 +37,7 @@ The app generates a fixed weekly plan: 2 batch dinners (4-6 portions each), 2 ma
 
 ## Configuration
 
-- `GEMINI_API_KEY` — Required. Set in `.env.local` (injected at build time via `vite.config.ts` `define` block as `process.env.GEMINI_API_KEY`)
+- `OPENAI_API_KEY` — Required. Set in `.env.local` (injected at build time via `vite.config.ts` `define` block as `process.env.OPENAI_API_KEY`)
 - `firebase-applet-config.json` — Firebase project config (checked into repo, used by AI Studio)
 - `firestore.rules` — Security rules enforcing per-user document ownership
 - Path alias: `@/` maps to project root (both in `tsconfig.json` and `vite.config.ts`)
