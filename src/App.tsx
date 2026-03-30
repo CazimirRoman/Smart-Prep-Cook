@@ -338,12 +338,14 @@ export default function App() {
     if (user) {
       const saveData = async () => {
         try {
+          const stripBase64Images = (items: Meal[]) =>
+            items.map(m => m.imageUrl?.startsWith('data:') ? { ...m, imageUrl: undefined } : m);
           await setDoc(doc(db, 'users', user.uid), {
             uid: user.uid,
-            meals: JSON.stringify(meals),
+            meals: JSON.stringify(stripBase64Images(meals)),
             groceries: JSON.stringify(groceries),
             pantryIngredients,
-            favorites: JSON.stringify(favorites),
+            favorites: JSON.stringify(stripBase64Images(favorites)),
             updatedAt: serverTimestamp()
           }, { merge: true });
         } catch (error) {
@@ -1116,7 +1118,7 @@ export default function App() {
                         )}
                         {imageUrlInputForMealId === meal.id && (
                           <div className={`${meal.imageUrl ? '' : '-mx-6 -mt-6 mb-4 p-4 bg-stone-50 border-b border-stone-200 rounded-t-2xl'}`}>
-                            <p className="text-xs text-stone-400 mb-2">Paste an image or enter a URL</p>
+                            <p className="text-xs text-stone-400 mb-2">Enter an image URL (pasted images are preview-only)</p>
                             <div className={`flex gap-2 ${meal.imageUrl ? 'mb-3' : ''}`}>
                               <input
                                 type="text"
