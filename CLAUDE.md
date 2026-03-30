@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Smart Prep & Cook is an AI-powered cooking assistant built as a Google AI Studio applet. It generates weekly meal plans (batch dinners + creative breakfasts), smart grocery lists, parallelized step-by-step cooking instructions, and a pantry-based recipe generator. Uses Gemini AI for all content generation.
+Smart Prep & Cook is an AI-powered cooking assistant. It generates weekly meal plans (batch dinners + creative breakfasts), smart grocery lists, parallelized step-by-step cooking instructions, and a pantry-based recipe generator. Uses OpenAI (GPT) for all content generation via a Vercel serverless proxy.
 
 ## Commands
 
@@ -32,6 +32,8 @@ No test framework is configured.
 ### Data Persistence
 
 Dual persistence strategy: localStorage for anonymous users, Firestore for authenticated (Google sign-in) users. The `App` component uses `isCloudUpdate` and `initialLoadDone` refs to prevent write loops between Firestore snapshots and local state updates. User data is stored as a single Firestore document at `/users/{userId}` with `meals`, `groceries`, and `favorites` stored as JSON strings.
+
+**Image storage:** Base64 images (from clipboard paste) are stripped before writing to Firestore to avoid hitting the 1 MB document size limit. Only URL-based images (from recipe imports or manual entry) are persisted. Pasted images show as a live preview during the session but don't survive a reload.
 
 ### Meal Plan Structure
 
