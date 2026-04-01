@@ -1754,6 +1754,35 @@ function CookingModeView({ meal, onClose, onFinish }: { meal: Meal, onClose: () 
     return () => clearInterval(interval);
   }, []);
 
+  // Keep screen awake during cooking
+  useEffect(() => {
+    let wakeLock: WakeLockSentinel | null = null;
+
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (_) {
+        // Wake lock request can fail (e.g., low battery)
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      wakeLock?.release();
+    };
+  }, []);
+
   const step = steps[currentStepIndex];
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
   const existingTimer = timers.find(t => t.id === step.id);
