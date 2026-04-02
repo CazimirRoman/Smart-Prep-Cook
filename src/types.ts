@@ -24,6 +24,7 @@ export interface Meal {
   miseEnPlace: string[];
   steps: CookingStep[];
   lastCookedAt?: string;
+  addedAt?: string;
   imageUrl?: string;
   sourceUrl?: string;
 }

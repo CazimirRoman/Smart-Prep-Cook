@@ -43,6 +43,14 @@ function partitionIngredients(ingredients: (Ingredient | string)[]) {
   return { main, spices };
 }
 
+function sortNewestFirst(meals: Meal[]): Meal[] {
+  return [...meals].sort((a, b) => {
+    const aTime = a.addedAt ? new Date(a.addedAt).getTime() : 0;
+    const bTime = b.addedAt ? new Date(b.addedAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
 function resizeImage(file: File, maxWidth = 600, quality = 0.6): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -156,6 +164,7 @@ export default function App() {
     try {
       const meal = await importRecipeFromUrl(importUrl, setImportStatus);
       meal.sourceUrl = importUrl;
+      meal.addedAt = new Date().toISOString();
       setFavorites(prev => {
         if (!prev.some(f => f.title === meal.title)) {
           return [...prev, meal];
@@ -185,6 +194,7 @@ export default function App() {
         imageUrl: meal.imageUrl || imported.imageUrl,
         lastCookedAt: meal.lastCookedAt,
         sourceUrl: replaceUrlInput.trim(),
+        addedAt: new Date().toISOString(),
       };
       setFavorites(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
       setMeals(prev => prev.map(m => m.id === meal.id ? updatedMeal : m));
@@ -201,6 +211,11 @@ export default function App() {
 
   const [planTab, setPlanTab] = useState<'morning' | 'dinner'>('morning');
   const [favTab, setFavTab] = useState<'morning' | 'dinner'>('morning');
+
+  const sortedBreakfasts = useMemo(() => sortNewestFirst(meals.filter(m => m.type === 'breakfast')), [meals]);
+  const sortedDinners = useMemo(() => sortNewestFirst(meals.filter(m => m.type === 'dinner')), [meals]);
+  const sortedFavBreakfasts = useMemo(() => sortNewestFirst(favorites.filter(m => m.type === 'breakfast')), [favorites]);
+  const sortedFavDinners = useMemo(() => sortNewestFirst(favorites.filter(m => m.type === 'dinner')), [favorites]);
 
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -364,7 +379,8 @@ export default function App() {
       if (!newMeals || newMeals.length === 0) {
         setError("AI returned an empty meal plan. Please try again.");
       } else {
-        setMeals(newMeals);
+        const now = new Date().toISOString();
+        setMeals(newMeals.map(m => m.addedAt ? m : { ...m, addedAt: now }));
       }
     } catch (e: any) {
       console.error(e);
@@ -380,7 +396,7 @@ export default function App() {
       if (isFav) {
         return prev.filter(f => f.title !== meal.title);
       } else {
-        return [...prev, meal];
+        return [...prev, meal.addedAt ? meal : { ...meal, addedAt: new Date().toISOString() }];
       }
     });
   };
@@ -422,7 +438,7 @@ export default function App() {
   const handleSwapMeal = async (meal: Meal) => {
     setSwappingMealId(meal.id);
     try {
-      const newMeal = await swapMeal(meal);
+      const newMeal = { ...await swapMeal(meal), addedAt: new Date().toISOString() };
       setMeals(prev => prev.map(m => m.id === meal.id ? newMeal : m));
       setGroceries({}); // Reset groceries list when a meal is swapped
     } catch (e) {
@@ -503,6 +519,7 @@ export default function App() {
       meal.type = 'dinner';
       meal.prepStyle = 'fresh';
       meal.portions = 2;
+      meal.addedAt = new Date().toISOString();
       setGeneratedPantryMeal(meal);
     } catch (e) {
       console.error(e);
@@ -683,7 +700,7 @@ export default function App() {
                         <span className="text-2xl">🌅</span> Morning Inspirations
                       </h3>
                       <div className="space-y-4">
-                        {meals.filter(m => m.type === 'breakfast').map(meal => (
+                        {sortedBreakfasts.map(meal => (
                         <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex justify-between items-start mb-2">
                               <div className="flex gap-2 flex-wrap">
@@ -761,7 +778,7 @@ export default function App() {
                       <span className="text-2xl">🍲</span> Batch Dinners
                     </h3>
                     <div className="space-y-4">
-                      {meals.filter(m => m.type === 'dinner').map((meal, index) => (
+                      {sortedDinners.map((meal, index) => (
                         <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex justify-between items-start mb-2">
                               <div className="flex gap-2 flex-wrap">
@@ -1094,9 +1111,9 @@ export default function App() {
                 onTabChange={setFavTab}
               />
 
-              {favorites.filter(m => favTab === 'morning' ? m.type === 'breakfast' : m.type === 'dinner').length > 0 ? (
+              {(favTab === 'morning' ? sortedFavBreakfasts : sortedFavDinners).length > 0 ? (
                 <div className="space-y-4">
-                  {favorites.filter(m => favTab === 'morning' ? m.type === 'breakfast' : m.type === 'dinner').map(meal => (
+                  {(favTab === 'morning' ? sortedFavBreakfasts : sortedFavDinners).map(meal => (
                     <div key={meal.id} className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm hover:shadow-md transition-shadow">
                         {meal.imageUrl ? (
                           <div className="relative -mx-6 -mt-6 mb-4">
