@@ -389,6 +389,34 @@ ${recipeText}` }],
   return meal;
 }
 
+export async function regenerateRecipeWithFeedback(meal: Meal, feedback: string): Promise<Meal> {
+  const mealJson = JSON.stringify({
+    title: meal.title,
+    description: meal.description,
+    type: meal.type,
+    prepStyle: meal.prepStyle,
+    portions: meal.portions,
+    ingredients: meal.ingredients,
+    steps: meal.steps,
+    miseEnPlace: meal.miseEnPlace,
+  });
+
+  const response = await callAI({
+    model: MODEL,
+    messages: [{ role: "user", content: `Here is an existing recipe:\n${mealJson}\n\nThe user has this feedback: "${feedback}"\n\nRegenerate the recipe incorporating that feedback. Keep the same type (${meal.type}), prepStyle (${meal.prepStyle}), and portions (${meal.portions}). Preserve the recipe's identity where possible — only change what the feedback requires.\n\nFor this recipe, also provide a highly optimized, parallelized step-by-step cooking guide. Identify steps that have a duration (like boiling, baking, simmering). For those steps, explicitly provide "parallelTasks" - what the user should do WHILE waiting for that step to finish.\n\nIMPORTANT: Use metric units (grams, kilograms, milliliters, liters) for ingredients measured by weight or volume (e.g., "500g chicken", "200ml cream"). For naturally countable items, use natural units instead (e.g., "3 eggs", "2 avocados", "4 slices of bread", "1 can of tomatoes"). NEVER use cups, ounces, pounds, tablespoons, teaspoons, or fractions like "1/2 teaspoon". Convert small amounts to grams or milliliters (e.g., "2g cinnamon", "5ml vanilla extract", "3g salt").\nCombine duplicate ingredients into a single entry with the total quantity.\nList ingredients in order of importance: main proteins/carbs first, then vegetables/dairy, then spices/seasonings last.` }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "feedback_recipe",
+        strict: true,
+        schema: mealSchema,
+      }
+    }
+  });
+
+  return JSON.parse(response.choices[0].message.content || "{}");
+}
+
 export async function generateRecipeFromIngredients(ingredients: string[]): Promise<Meal> {
   const response = await callAI({
     model: MODEL,

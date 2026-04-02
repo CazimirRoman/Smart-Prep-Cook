@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl } from './services/ai';
+import { generateMealPlan, swapMeal, generateGroceryList, generateRecipeFromIngredients, importRecipeFromUrl, regenerateRecipeWithFeedback } from './services/ai';
 import { Meal, Ingredient, CategorizedGroceries } from './types';
-import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus, ExternalLink, Globe } from 'lucide-react';
+import { ChefHat, ShoppingCart, Calendar, RefreshCw, Play, CheckCircle2, Circle, Clock, ArrowRight, ArrowLeft, Heart, X, Utensils, Plus, LogOut, LogIn, Pencil, Trash2, Camera, ImagePlus, ExternalLink, Globe, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, provider } from './firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -71,14 +71,8 @@ function resizeImage(file: File, maxWidth = 600, quality = 0.6): Promise<string>
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'plan' | 'groceries' | 'pantry' | 'favorites'>('plan');
-  const [meals, setMeals] = useState<Meal[]>(() => {
-    const saved = localStorage.getItem('smart-cook-meals');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [groceries, setGroceries] = useState<CategorizedGroceries>(() => {
-    const saved = localStorage.getItem('smart-cook-groceries');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [groceries, setGroceries] = useState<CategorizedGroceries>({});
   
   const [loadingMeals, setLoadingMeals] = useState(false);
   const [loadingGroceries, setLoadingGroceries] = useState(false);
@@ -93,6 +87,8 @@ export default function App() {
     loading: boolean;
     groceries: CategorizedGroceries | null;
   }>({ isOpen: false, meal: null, loading: false, groceries: null });
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackPreview, setFeedbackPreview] = useState<{ original: Meal, updated: Meal, feedback: string } | null>(null);
 
   const handleUpdateMeal = (updatedMeal: Meal) => {
     const update = (prev: Meal[]) => prev.map(m => m.id === updatedMeal.id ? updatedMeal : m);
@@ -134,19 +130,13 @@ export default function App() {
   };
 
   // Pantry State
-  const [pantryIngredients, setPantryIngredients] = useState<string[]>(() => {
-    const saved = localStorage.getItem('smart-cook-pantry');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [pantryIngredients, setPantryIngredients] = useState<string[]>([]);
   const [ingredientInput, setIngredientInput] = useState('');
   const [generatedPantryMeal, setGeneratedPantryMeal] = useState<Meal | null>(null);
   const [loadingPantryMeal, setLoadingPantryMeal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [favorites, setFavorites] = useState<Meal[]>(() => {
-    const saved = localStorage.getItem('smart-cook-favorites');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [favorites, setFavorites] = useState<Meal[]>([]);
 
   const [importUrl, setImportUrl] = useState('');
   const [importingRecipe, setImportingRecipe] = useState(false);
@@ -214,6 +204,7 @@ export default function App() {
 
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isDataReady, setIsDataReady] = useState(false);
   const isCloudUpdate = React.useRef(false);
   const initialLoadDone = React.useRef(false);
 
@@ -302,9 +293,11 @@ export default function App() {
       if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
       
       initialLoadDone.current = true;
+      setIsDataReady(true);
       return;
     }
 
+    setIsDataReady(false);
     initialLoadDone.current = false; // Reset for new user
 
     const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
@@ -323,6 +316,7 @@ export default function App() {
       setTimeout(() => {
         isCloudUpdate.current = false;
         initialLoadDone.current = true;
+        setIsDataReady(true);
       }, 100);
       
     }, (error) => {
@@ -435,6 +429,23 @@ export default function App() {
       console.error(e);
     } finally {
       setSwappingMealId(null);
+    }
+  };
+
+  const handleFeedbackRegenerate = async (meal: Meal, feedback: string) => {
+    setFeedbackLoading(true);
+    try {
+      const result = await regenerateRecipeWithFeedback(meal, feedback);
+      result.id = meal.id;
+      result.imageUrl = meal.imageUrl;
+      result.sourceUrl = meal.sourceUrl;
+      result.lastCookedAt = meal.lastCookedAt;
+      setFeedbackPreview({ original: meal, updated: result, feedback });
+      setSelectedMealForPreview(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFeedbackLoading(false);
     }
   };
 
@@ -616,6 +627,11 @@ export default function App() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-6">
+        {!isDataReady ? (
+          <div className="flex justify-center items-center py-20 text-stone-400">
+            <RefreshCw size={24} className="animate-spin" />
+          </div>
+        ) : (
         <AnimatePresence mode="wait">
           {activeTab === 'plan' ? (
             <motion.div 
@@ -1303,6 +1319,7 @@ export default function App() {
             </motion.div>
           ) : null}
         </AnimatePresence>
+        )}
       </main>
 
       {/* Bottom Nav */}
@@ -1356,13 +1373,27 @@ export default function App() {
             }}
             onEdit={() => setEditingMeal(selectedMealForPreview)}
             onImageClick={(url) => setPreviewImageUrl(url)}
+            onFeedbackRegenerate={(feedback) => handleFeedbackRegenerate(selectedMealForPreview, feedback)}
+            feedbackLoading={feedbackLoading}
           />
         )}
         {editingMeal && (
-          <EditRecipeModal 
+          <EditRecipeModal
             meal={editingMeal}
             onClose={() => setEditingMeal(null)}
             onSave={handleUpdateMeal}
+          />
+        )}
+        {feedbackPreview && (
+          <FeedbackPreviewModal
+            original={feedbackPreview.original}
+            updated={feedbackPreview.updated}
+            feedback={feedbackPreview.feedback}
+            onAccept={() => {
+              handleUpdateMeal(feedbackPreview.updated);
+              setFeedbackPreview(null);
+            }}
+            onDiscard={() => setFeedbackPreview(null)}
           />
         )}
       </AnimatePresence>
@@ -1584,7 +1615,127 @@ function EditRecipeModal({ meal, onClose, onSave }: { meal: Meal, onClose: () =>
   );
 }
 
-function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick }: { meal: Meal, onClose: () => void, onStartCooking: () => void, onEdit: () => void, onImageClick?: (url: string) => void }) {
+function FeedbackPreviewModal({ original, updated, feedback, onAccept, onDiscard }: { original: Meal, updated: Meal, feedback: string, onAccept: () => void, onDiscard: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+      >
+        <div className="p-6 border-b border-stone-100">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-2xl font-bold text-stone-800">{updated.title}</h2>
+              {updated.title !== original.title && (
+                <p className="text-sm text-stone-400 line-through mt-0.5">{original.title}</p>
+              )}
+            </div>
+            <button onClick={onDiscard} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+              <X size={24} className="text-stone-400" />
+            </button>
+          </div>
+          <div className="mt-3 flex items-start gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+            <MessageSquare size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+            <p className="text-sm text-emerald-800">
+              <span className="font-semibold">Your feedback:</span> "{feedback}"
+            </p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          <section>
+            <p className="text-stone-600 leading-relaxed">{updated.description}</p>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Utensils size={20} className="text-emerald-500" />
+                Ingredients
+              </h3>
+              <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                {updated.portions} Portions
+              </span>
+            </div>
+            {(() => {
+              const { main, spices } = partitionIngredients(updated.ingredients);
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {main.map((ing, idx) => (
+                      <div key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
+                        <span className="text-xl">{typeof ing === 'string' ? '🛒' : ing.icon}</span>
+                        <span className="text-stone-700 font-medium">{typeof ing === 'string' ? ing : ing.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {spices.length > 0 && (
+                    <div className="mt-4 bg-amber-50/60 rounded-xl border border-amber-100 p-4">
+                      <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wider mb-2">Spices & Seasonings</p>
+                      <div className="flex flex-wrap gap-2">
+                        {spices.map((ing, idx) => (
+                          <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/80 rounded-lg border border-amber-100 text-sm text-stone-600">
+                            <span>{typeof ing === 'string' ? '🧂' : ing.icon}</span>
+                            {typeof ing === 'string' ? ing : ing.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </section>
+
+          <section>
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Clock size={20} className="text-emerald-500" />
+              Cooking Steps
+            </h3>
+            <div className="space-y-4">
+              {updated.steps.map((step, idx) => (
+                <div key={idx} className="flex gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center font-bold text-stone-500">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-stone-700 leading-relaxed font-medium">{step.instruction}</p>
+                    {step.durationMinutes && (
+                      <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider mt-1 block">
+                        ⏱️ {step.durationMinutes} min
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="p-6 border-t border-stone-100 bg-stone-50 flex gap-4">
+          <button
+            onClick={onDiscard}
+            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-semibold hover:bg-white transition-colors"
+          >
+            Discard
+          </button>
+          <button
+            onClick={onAccept}
+            className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+          >
+            <CheckCircle2 size={18} />
+            Accept Changes
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick, onFeedbackRegenerate, feedbackLoading }: { meal: Meal, onClose: () => void, onStartCooking: () => void, onEdit: () => void, onImageClick?: (url: string) => void, onFeedbackRegenerate: (feedback: string) => void, feedbackLoading: boolean }) {
+  const [feedbackText, setFeedbackText] = useState('');
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
       <motion.div 
@@ -1701,20 +1852,49 @@ function RecipeDetailModal({ meal, onClose, onStartCooking, onEdit, onImageClick
           </section>
         </div>
 
-        <div className="p-6 border-t border-stone-100 bg-stone-50 flex gap-4">
-          <button 
-            onClick={onClose}
-            className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-semibold hover:bg-white transition-colors"
+        <div className="p-6 border-t border-stone-100 bg-stone-50 space-y-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (feedbackText.trim() && !feedbackLoading) onFeedbackRegenerate(feedbackText.trim());
+            }}
+            className="flex gap-2"
           >
-            Close
-          </button>
-          <button 
-            onClick={onStartCooking}
-            className="flex-1 py-3 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors flex items-center justify-center gap-2"
-          >
-            <Play size={18} fill="currentColor" />
-            Start Interactive Cooking
-          </button>
+            <div className="relative flex-1">
+              <MessageSquare size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+              <input
+                type="text"
+                value={feedbackText}
+                onChange={(e) => setFeedbackText(e.target.value)}
+                placeholder="Too fatty, make it spicier, use chicken instead..."
+                disabled={feedbackLoading}
+                className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all disabled:opacity-50"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!feedbackText.trim() || feedbackLoading}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2 shrink-0"
+            >
+              <RefreshCw size={14} className={feedbackLoading ? "animate-spin" : ""} />
+              {feedbackLoading ? 'Regenerating...' : 'Regenerate'}
+            </button>
+          </form>
+          <div className="flex gap-4">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl border border-stone-200 text-stone-600 font-semibold hover:bg-white transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={onStartCooking}
+              className="flex-1 py-3 rounded-xl bg-stone-900 text-white font-semibold hover:bg-stone-800 transition-colors flex items-center justify-center gap-2"
+            >
+              <Play size={18} fill="currentColor" />
+              Start Interactive Cooking
+            </button>
+          </div>
         </div>
       </motion.div>
     </div>
