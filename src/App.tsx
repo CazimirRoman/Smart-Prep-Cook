@@ -111,6 +111,8 @@ export default function App() {
     setEditingMeal(null);
   };
 
+  const MEAL_GROCERIES_KEY = 'smart-cook-meal-groceries-checked';
+
   const handleViewMealGroceries = (meal: Meal) => {
     const list: CategorizedGroceries = {};
     meal.ingredients.forEach(ing => {
@@ -122,6 +124,17 @@ export default function App() {
         list[ing.category].push({ item: ing.name, icon: ing.icon, checked: false });
       }
     });
+    const saved = JSON.parse(localStorage.getItem(MEAL_GROCERIES_KEY) || '{}');
+    const mealChecked = saved[meal.id];
+    if (mealChecked) {
+      Object.entries(list).forEach(([cat, items]) => {
+        if (mealChecked[cat]) {
+          (items as { item: string; icon: string; checked: boolean }[]).forEach((item, i) => {
+            if (i < mealChecked[cat].length) item.checked = mealChecked[cat][i];
+          });
+        }
+      });
+    }
     setMealGroceriesState({ isOpen: true, meal, loading: false, groceries: list });
   };
 
@@ -490,6 +503,43 @@ export default function App() {
     });
   };
 
+  const toggleMealGroceryItem = (category: string, index: number) => {
+    if (navigator.vibrate) navigator.vibrate(15);
+    setMealGroceriesState(prev => {
+      if (!prev.groceries) return prev;
+      const newGroceries = { ...prev.groceries };
+      newGroceries[category] = [...prev.groceries[category]];
+      newGroceries[category][index] = {
+        ...newGroceries[category][index],
+        checked: !newGroceries[category][index].checked
+      };
+      if (prev.meal) {
+        const saved = JSON.parse(localStorage.getItem(MEAL_GROCERIES_KEY) || '{}');
+        saved[prev.meal.id] = Object.fromEntries(
+          (Object.entries(newGroceries) as [string, { item: string; icon: string; checked: boolean }[]][]).map(([cat, items]) => [cat, items.map(i => i.checked)])
+        );
+        localStorage.setItem(MEAL_GROCERIES_KEY, JSON.stringify(saved));
+      }
+      return { ...prev, groceries: newGroceries };
+    });
+  };
+
+  const uncheckAllMealGroceries = () => {
+    setMealGroceriesState(prev => {
+      if (!prev.groceries) return prev;
+      const newGroceries: CategorizedGroceries = {};
+      (Object.entries(prev.groceries) as [string, { item: string; icon: string; checked: boolean }[]][]).forEach(([cat, items]) => {
+        newGroceries[cat] = items.map(item => ({ ...item, checked: false }));
+      });
+      if (prev.meal) {
+        const saved = JSON.parse(localStorage.getItem(MEAL_GROCERIES_KEY) || '{}');
+        delete saved[prev.meal.id];
+        localStorage.setItem(MEAL_GROCERIES_KEY, JSON.stringify(saved));
+      }
+      return { ...prev, groceries: newGroceries };
+    });
+  };
+
   const handleAddIngredient = (e: React.FormEvent) => {
     e.preventDefault();
     if (ingredientInput.trim() && !pantryIngredients.includes(ingredientInput.trim())) {
@@ -535,56 +585,6 @@ export default function App() {
   const closeCookingMode = () => {
     setActiveCookingMeal(null);
   };
-
-  if (mealGroceriesState.isOpen && mealGroceriesState.meal) {
-    return (
-      <div className="min-h-screen bg-stone-50 font-sans p-4 sm:p-8 flex items-center justify-center">
-        <div className="bg-white rounded-3xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-          <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-900 text-white">
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <ShoppingCart size={24} />
-              Groceries for {mealGroceriesState.meal.title}
-            </h2>
-            <button 
-              onClick={() => setMealGroceriesState({ isOpen: false, meal: null, loading: false, groceries: null })}
-              className="p-2 hover:bg-stone-800 rounded-full transition-colors"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          
-          <div className="p-6 overflow-y-auto flex-1">
-            {mealGroceriesState.loading ? (
-              <div className="flex flex-col items-center justify-center py-12 text-stone-500">
-                <RefreshCw size={32} className="animate-spin mb-4 text-emerald-500" />
-                <p>Generating grocery list...</p>
-              </div>
-            ) : mealGroceriesState.groceries ? (
-              <div className="space-y-6">
-                {Object.entries(mealGroceriesState.groceries).map(([category, items]) => (
-                  <div key={category}>
-                    <h3 className="text-lg font-semibold text-stone-800 mb-3 capitalize">{category}</h3>
-                    <ul className="space-y-2">
-                      {(items as { item: string; icon: string; checked: boolean }[]).map((item, idx) => (
-                        <li key={idx} className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100">
-                          <span className="text-xl">{item.icon || '🛒'}</span>
-                          <span className="text-stone-700 font-medium">{item.item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center text-stone-500 py-8">
-                Failed to load groceries.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (activeCookingMeal) {
     return (
@@ -1412,6 +1412,74 @@ export default function App() {
             }}
             onDiscard={() => setFeedbackPreview(null)}
           />
+        )}
+        {mealGroceriesState.isOpen && mealGroceriesState.meal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-stone-100 flex justify-between items-center bg-stone-900 text-white">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <ShoppingCart size={24} />
+                  Groceries for {mealGroceriesState.meal.title}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={uncheckAllMealGroceries}
+                    className="text-sm px-3 py-1.5 hover:bg-stone-800 rounded-lg transition-colors text-stone-300 hover:text-white"
+                  >
+                    Uncheck All
+                  </button>
+                  <button
+                    onClick={() => setMealGroceriesState({ isOpen: false, meal: null, loading: false, groceries: null })}
+                    className="p-2 hover:bg-stone-800 rounded-full transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+              <div className="p-6 overflow-y-auto flex-1">
+                {mealGroceriesState.loading ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-stone-500">
+                    <RefreshCw size={32} className="animate-spin mb-4 text-emerald-500" />
+                    <p>Generating grocery list...</p>
+                  </div>
+                ) : mealGroceriesState.groceries ? (
+                  <div className="space-y-6">
+                    {Object.entries(mealGroceriesState.groceries).map(([category, items]) => (
+                      <div key={category}>
+                        <h3 className="text-lg font-semibold text-stone-800 mb-3 capitalize">{category}</h3>
+                        <ul className="space-y-2">
+                          {(items as { item: string; icon: string; checked: boolean }[]).map((item, idx) => (
+                            <li
+                              key={idx}
+                              className="flex items-center gap-3 p-3 bg-stone-50 rounded-xl border border-stone-100 cursor-pointer group"
+                              onClick={() => toggleMealGroceryItem(category, idx)}
+                            >
+                              <div className="shrink-0 text-emerald-500">
+                                {item.checked ? <CheckCircle2 size={20} /> : <Circle size={20} className="text-stone-300 group-hover:text-emerald-400" />}
+                              </div>
+                              <span className={`text-stone-700 font-medium flex items-center gap-2 ${item.checked ? 'line-through opacity-50' : ''}`}>
+                                <span className="text-xl">{item.icon || '🛒'}</span>
+                                {item.item}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-stone-500 py-8">
+                    Failed to load groceries.
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
